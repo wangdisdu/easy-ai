@@ -7,6 +7,7 @@ from app.core.response import PagedResp, Resp
 from app.core.snowflake import SnowflakeGenerator
 from app.db.session import get_db
 from app.model.role_model import RoleCreateReq, RolePageReq, RoleResp, RoleUpdateReq, UserRoleAddReq
+from app.model.user_model import UserResp
 from app.service.role_service import RoleService
 
 router = APIRouter(prefix="/role", tags=["role"])
@@ -72,3 +73,8 @@ def bind_user_role(
         db=db, role_id=int(role_id), user_id=int(req.user_id), req_ctx=req_ctx
     )
     return Resp(data=True)
+
+
+@router.get("/{role_id}/user", response_model=Resp[list[UserResp]])
+def list_role_users(role_id: str, db: Session = Depends(get_db)) -> Resp[list[UserResp]]:
+    return Resp(data=service.list_users_by_role(db=db, role_id=int(role_id)))

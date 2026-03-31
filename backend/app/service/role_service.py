@@ -9,6 +9,7 @@ from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
 from app.db.schema import TbRole, TbUser, TbUserRole
+from app.model.user_model import UserResp
 from app.model.role_model import RoleCreateReq, RolePageReq, RoleResp, RoleUpdateReq
 
 
@@ -121,3 +122,15 @@ class RoleService:
         )
         db.add(entity)
         db.commit()
+
+    def list_users_by_role(self, db: Session, role_id: int) -> list[UserResp]:
+        if not db.get(TbRole, role_id):
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, "role not found")
+
+        rows = db.scalars(
+            select(TbUser)
+            .join(TbUserRole, TbUserRole.user_id == TbUser.id)
+            .where(TbUserRole.role_id == role_id)
+            .order_by(TbUser.create_time.desc())
+        ).all()
+        return [UserResp.from_entity(row) for row in rows]

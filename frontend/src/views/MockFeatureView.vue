@@ -13,6 +13,7 @@ import { useRoute } from "vue-router";
 
 const route = useRoute();
 const pageTitle = computed(() => {
+  if (route.meta.title) return String(route.meta.title);
   const raw = route.meta.breadcrumb;
   if (Array.isArray(raw) && raw.length > 0) return String(raw[raw.length - 1]);
   return "功能预览";
@@ -34,4 +35,3 @@ const pageTitle = computed(() => {
   color: rgba(0, 0, 0, 0.6);
 }
 </style>
-

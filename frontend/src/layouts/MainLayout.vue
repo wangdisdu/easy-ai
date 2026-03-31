@@ -6,34 +6,32 @@
       :trigger="null"
       theme="light"
       :width="220"
-      :collapsed-width="56"
+      :collapsed-width="64"
       class="app-layout-sider"
     >
       <div class="sider-brand">
         <div class="sider-brand-main" @click="onBrandClick">
-          <span class="sider-brand-icon">
-            <ThunderboltOutlined />
+          <div v-if="!collapsed" class="sider-brand-copy">
+            <div class="sider-brand-accent"></div>
+            <div class="sider-brand-text">智瞻 AI</div>
+            <div class="sider-brand-subtitle">Enterprise Platform</div>
+          </div>
+          <span class="sider-brand-icon" aria-hidden="true">
+            <img :src="logoAi" alt="" class="sider-brand-icon-image" />
           </span>
-          <span v-if="!collapsed" class="sider-brand-text">easy-ai</span>
         </div>
       </div>
       <a-menu
         v-model:selected-keys="selectedKeys"
-        v-model:open-keys="openKeys"
         theme="light"
         mode="inline"
         class="app-side-menu"
-        :get-popup-container="menuPopupContainer"
         @click="onMenuClick"
       >
-        <a-sub-menu v-for="group in menuGroups" :key="group.key">
-          <template #icon><component :is="resolveIcon(group.iconKey)" /></template>
-          <template #title>{{ group.title }}</template>
-          <a-menu-item v-for="item in group.items" :key="item.path">
-            <template #icon><component :is="resolveIcon(item.iconKey)" /></template>
-            {{ item.title }}
-          </a-menu-item>
-        </a-sub-menu>
+        <a-menu-item v-for="item in menuItems" :key="item.path">
+          <template #icon><AppIcon :name="item.iconKey" /></template>
+          {{ item.title }}
+        </a-menu-item>
       </a-menu>
 
       <div class="sider-footer">
@@ -60,9 +58,13 @@
           </a-col>
           <a-col flex="none" class="header-user">
             <a-dropdown>
-              <a-button type="text">
-                {{ auth.user?.account ?? "用户" }}
-                <DownOutlined />
+              <a-button type="text" class="header-user-trigger">
+                <span class="header-user-avatar">{{ userInitial }}</span>
+                <span class="header-user-meta">
+                  <span class="header-user-name">{{ auth.user?.account ?? "用户" }}</span>
+                  <span class="header-user-role">管理员</span>
+                </span>
+                <DownOutlined class="header-user-chevron" />
               </a-button>
               <template #overlay>
                 <a-menu>
@@ -84,140 +86,79 @@
 import { computed, ref, watch } from "vue";
 import { useRoute, useRouter, type RouteRecordNormalized } from "vue-router";
 import {
-  AppstoreOutlined,
   DownOutlined,
   LeftOutlined,
   RightOutlined,
-  SafetyOutlined,
-  TeamOutlined,
-  ThunderboltOutlined,
-  UserOutlined,
 } from "@ant-design/icons-vue";
 import { useAuthStore } from "@/stores/auth";
+import AppIcon from "@/components/AppIcon.vue";
+import logoAi from "@/assets/icons/logo-ai.svg";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 
-type IconKey = "appstore" | "user" | "team" | "safety";
+type IconKey =
+  | "appstore"
+  | "cluster"
+  | "database"
+  | "eye"
+  | "robot"
+  | "safety"
+  | "setting"
+  | "tool";
 type MenuMeta = {
-  groupKey: string;
-  groupTitle: string;
-  groupIcon: IconKey;
-  itemTitle: string;
-  itemIcon: IconKey;
+  title: string;
+  icon: IconKey;
+  order: number;
 };
 type MenuItem = {
   path: string;
   title: string;
   iconKey: IconKey;
 };
-type MenuGroup = {
-  key: string;
-  title: string;
-  iconKey: IconKey;
-  items: MenuItem[];
-};
-
-const iconMap: Record<IconKey, unknown> = {
-  appstore: AppstoreOutlined,
-  user: UserOutlined,
-  team: TeamOutlined,
-  safety: SafetyOutlined,
-};
-
-function resolveIcon(iconKey: IconKey) {
-  return iconMap[iconKey];
-}
 
 const breadcrumbItems = computed(() => {
-  const raw = route.meta.breadcrumb;
-  return Array.isArray(raw) ? (raw as string[]) : [];
+  const title = route.meta.title;
+  return title ? [String(title)] : [];
 });
 
-const menuGroups = computed<MenuGroup[]>(() => {
-  const groups = new Map<string, MenuGroup>();
-  const records = router
+const userInitial = computed(() => (auth.user?.account?.trim().charAt(0) ?? "用").toUpperCase());
+
+const menuItems = computed<MenuItem[]>(() =>
+  router
     .getRoutes()
-    .filter((r: RouteRecordNormalized) => Boolean((r.meta as { menu?: MenuMeta }).menu));
-
-  for (const record of records) {
-    const menu = (record.meta as { menu?: MenuMeta }).menu;
-    if (!menu) continue;
-
-    if (!groups.has(menu.groupKey)) {
-      groups.set(menu.groupKey, {
-        key: menu.groupKey,
-        title: menu.groupTitle,
-        iconKey: menu.groupIcon,
-        items: [],
-      });
-    }
-
-    groups.get(menu.groupKey)?.items.push({
-      path: record.path,
-      title: menu.itemTitle,
-      iconKey: menu.itemIcon,
-    });
-  }
-
-  return [...groups.values()];
-});
-
-function getGroupKeyByPath(path: string): string | undefined {
-  for (const group of menuGroups.value) {
-    if (group.items.some((item) => item.path === path)) {
-      return group.key;
-    }
-  }
-  return undefined;
-}
+    .filter((record: RouteRecordNormalized) => Boolean((record.meta as { menu?: MenuMeta }).menu))
+    .sort((a, b) => {
+      const aMenu = (a.meta as { menu: MenuMeta }).menu;
+      const bMenu = (b.meta as { menu: MenuMeta }).menu;
+      return aMenu.order - bMenu.order;
+    })
+    .map((record) => {
+      const menu = (record.meta as { menu: MenuMeta }).menu;
+      return {
+        path: record.path,
+        title: menu.title,
+        iconKey: menu.icon,
+      };
+    }),
+);
 
 const collapsed = ref(false);
 const selectedKeys = ref<string[]>([route.path]);
-const initialOpenKey = getGroupKeyByPath(route.path);
-const openKeys = ref<string[]>(initialOpenKey ? [initialOpenKey] : []);
-/** 侧栏折叠时收起 openKeys，避免受控 openKeys 与弹出子菜单冲突 */
-const openKeysWhenExpanded = ref<string[]>(initialOpenKey ? [initialOpenKey] : []);
-
-function menuPopupContainer() {
-  return document.body;
-}
-
-watch(collapsed, (isCollapsed) => {
-  if (isCollapsed) {
-    openKeysWhenExpanded.value = [...openKeys.value];
-    openKeys.value = [];
-  } else {
-    openKeys.value = [...openKeysWhenExpanded.value];
-  }
-});
 
 watch(
   () => route.path,
-  (p) => {
-    selectedKeys.value = [p];
-    if (!collapsed.value) {
-      const key = getGroupKeyByPath(p);
-      if (key) {
-        openKeys.value = [key];
-      }
-    }
+  (path) => {
+    selectedKeys.value = [path];
   },
   { immediate: true },
 );
-
-watch(openKeys, (keys) => {
-  if (!collapsed.value) {
-    openKeysWhenExpanded.value = [...keys];
-  }
-});
 
 function onMenuClick({ key }: { key: string | number }) {
   router.push(String(key));
 }
 
-/** 顶部 Logo 点击：展开/收起侧栏 */
 function onBrandClick() {
   collapsed.value = !collapsed.value;
 }
@@ -234,16 +175,24 @@ auth.loadProfile().catch(async () => {
 </script>
 
 <style scoped>
-/* ===================== App Menu ===================== */
+.app-layout-root {
+  --sider-pad-x: 10px;
+  --menu-radius: 12px;
+  --header-height: 56px;
+  --content-pad: 24px;
+}
 
-/* ===================== App Layout ===================== */
 .app-layout-root.ant-layout {
   min-height: 100vh;
 }
 
 .app-layout-sider {
-  border-right: 1px solid rgba(5, 5, 5, 0.06);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.55);
+  background:
+    linear-gradient(180deg, rgba(241, 245, 255, 0.92) 0%, rgba(255, 255, 255, 1) 28%, rgba(248, 250, 255, 1) 100%) !important;
+  border-right: 1px solid rgba(22, 119, 255, 0.08);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.8),
+    8px 0 24px rgba(15, 23, 42, 0.03);
 }
 
 .app-layout-sider :deep(.ant-layout-sider-children) {
@@ -253,135 +202,155 @@ auth.loadProfile().catch(async () => {
 }
 
 .sider-brand {
-  height: 50px;
+  height: 80px;
   display: flex;
-  align-items: center;
-  padding: 0 10px;
-  background: linear-gradient(90deg, rgba(22, 119, 255, 0.2), rgba(22, 119, 255, 0.01));
+  align-items: flex-end;
+  padding: 0 12px 12px;
 }
 
 .sider-brand-main {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  border-radius: 10px;
-  padding: 6px 8px;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 14px;
+  padding: 0 4px;
   cursor: pointer;
   user-select: none;
-  transition: background-color 0.2s ease;
+  transition: transform 0.2s ease;
+}
+
+.sider-brand-main:hover {
+  transform: translateY(-1px);
+}
+
+.sider-brand-copy {
+  min-width: 0;
+}
+
+.sider-brand-accent {
+  width: 34px;
+  height: 3px;
+  margin-bottom: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1677ff 0%, #7c3aed 100%);
 }
 
 .sider-brand-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #1677ff;
-  background: rgba(22, 119, 255, 0.12);
+}
+
+.sider-brand-icon-image {
+  width: 32px;
+  height: 32px;
+  display: block;
 }
 
 .sider-brand-text {
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.04em;
+}
+
+.sider-brand-subtitle {
+  margin-top: 4px;
+  font-size: 9px;
+  line-height: 1.2;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.88);
-  letter-spacing: 0.01em;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #64748b;
 }
 
 .app-side-menu {
   flex: 1;
   border-inline-end: 0 !important;
   background: transparent;
-  padding: 6px 0;
+  padding: 10px var(--sider-pad-x) 0;
 }
 
-.app-side-menu :deep(.ant-menu-submenu-title) {
-  height: 38px;
-  line-height: 38px;
-  font-weight: 600;
+.app-side-menu :deep(.ant-menu-item) {
+  position: relative;
+  height: 42px;
+  line-height: 42px;
+  width: auto;
+  margin: 2px 0;
+  border-radius: var(--menu-radius);
+  color: #64748b;
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    transform 0.2s ease;
 }
 
-.app-side-menu :deep(.ant-menu-submenu-title .ant-menu-title-content) {
+.app-side-menu :deep(.ant-menu-item .ant-menu-title-content) {
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 
-.app-side-menu :deep(.ant-menu-submenu-title:hover),
+.app-side-menu :deep(.ant-menu-item .ant-menu-item-icon) {
+  color: inherit;
+  transition: color 0.2s ease;
+}
+
 .app-side-menu :deep(.ant-menu-item:hover) {
-  background: rgba(22, 119, 255, 0.08) !important;
-}
-
-.app-side-menu :deep(.ant-menu-sub.ant-menu-inline) {
-  margin-top: 4px;
-  margin-bottom: 6px;
-  margin-left: 10px;
-  padding: 4px 0 4px 10px;
-  background: transparent !important;
-}
-
-.app-side-menu :deep(.ant-menu-sub),
-.app-side-menu :deep(.ant-menu-inline .ant-menu-submenu),
-.app-side-menu :deep(.ant-menu-submenu .ant-menu) {
-  background: transparent !important;
-}
-
-.app-side-menu :deep(.ant-menu-sub .ant-menu-item) {
-  height: 34px;
-  line-height: 34px;
-  margin: 2px 0;
-  font-weight: 400;
-  color: rgba(0, 0, 0, 0.72);
-  border-radius: 8px;
-  background: transparent;
-  padding-left: 24px !important;
-}
-
-.app-side-menu :deep(.ant-menu-sub .ant-menu-item .ant-menu-title-content) {
-  font-size: 13px;
+  color: #334155;
+  background: rgba(22, 119, 255, 0.05) !important;
+  transform: translateX(1px);
 }
 
 .app-side-menu :deep(.ant-menu-item-selected) {
-  background: linear-gradient(90deg, rgba(22, 119, 255, 0.2), rgba(22, 119, 255, 0.07)) !important;
-  color: #1677ff !important;
+  background: linear-gradient(90deg, rgba(22, 119, 255, 0.14) 0%, rgba(22, 119, 255, 0.05) 100%) !important;
+  color: #0f172a !important;
   font-weight: 500;
+  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.04);
 }
 
 .app-side-menu :deep(.ant-menu-item-selected)::after {
-  border-inline-end: 3px solid #1677ff !important;
+  display: none;
 }
 
-.app-side-menu :deep(.ant-menu-sub .ant-menu-item-selected) {
-  background: linear-gradient(90deg, rgba(22, 119, 255, 0.18), rgba(22, 119, 255, 0.04)) !important;
-  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.01);
-}
-
-.app-side-menu :deep(.ant-menu-sub .ant-menu-item-selected)::after {
-  border-inline-end: 0 !important;
-}
-
-.app-side-menu :deep(.ant-menu-sub .ant-menu-item-selected)::before {
+.app-side-menu :deep(.ant-menu-item-selected)::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 7px;
+  top: 50%;
   width: 3px;
   height: 20px;
-  border-radius: 0 2px 2px 0;
-  background: #1677ff;
+  border-radius: 0 3px 3px 0;
+  transform: translateY(-50%);
+  background: linear-gradient(180deg, #1677ff 0%, #7c3aed 100%);
+  box-shadow: 0 0 8px rgba(22, 119, 255, 0.28);
+}
+
+.app-side-menu :deep(.ant-menu-item-selected .ant-menu-item-icon) {
+  color: #1677ff;
+}
+
+.app-side-menu :deep(.ant-menu-inline-collapsed > .ant-menu-item) {
+  inset-inline-start: 0;
+  padding-inline: calc(50% - 8px) !important;
 }
 
 .sider-footer {
-  padding: 8px;
+  padding: 10px var(--sider-pad-x) 14px;
 }
 
 .sider-collapse-btn {
   width: 100%;
-  height: 34px;
+  height: 38px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--menu-radius);
   background: transparent;
-  color: rgba(0, 0, 0, 0.72);
+  color: #64748b;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -391,8 +360,8 @@ auth.loadProfile().catch(async () => {
 }
 
 .sider-collapse-btn:hover {
-  color: #1677ff;
-  background: rgba(22, 119, 255, 0.1);
+  color: #334155;
+  background: rgba(22, 119, 255, 0.05);
 }
 
 .app-layout-main.ant-layout {
@@ -403,49 +372,134 @@ auth.loadProfile().catch(async () => {
   flex-direction: column;
 }
 
+.app-layout-header.ant-layout-header,
+.app-layout-content.ant-layout-content {
+  padding-inline: var(--content-pad);
+}
+
 .app-layout-content.ant-layout-content {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 24px;
-  background-color: rgb(249 250 253);
-  background-image: linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
+  padding-block: var(--content-pad);
+  background:
+    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+    rgb(249 250 253);
   background-size: 48px 48px;
   background-position: 0 0;
 }
 
-/* ===================== Header ===================== */
 .app-layout-header.ant-layout-header {
-  height: 50px;
-  line-height: 50px;
+  height: var(--header-height);
+  line-height: var(--header-height);
   padding-block: 0;
-  padding-inline: 24px;
-  background: #fff !important;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.06);
+  background: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
-.header-row {
+.header-row,
+.header-left {
+  display: flex;
   width: 100%;
+  align-items: center;
 }
 
 .header-left {
-  display: flex;
-  align-items: center;
   justify-content: flex-start;
   min-width: 0;
 }
 
 .header-user {
   flex-shrink: 0;
+  padding-left: 18px;
+  margin-left: 20px;
+  border-left: 1px solid rgba(148, 163, 184, 0.16);
 }
 
-.header-breadcrumb {
-  margin: 0;
-}
+.header-breadcrumb { margin: 0; }
 
 .header-breadcrumb :deep(ol) {
   justify-content: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.header-breadcrumb :deep(.ant-breadcrumb-link),
+.header-breadcrumb :deep(.ant-breadcrumb-separator) {
+  color: #64748b;
+}
+
+.header-breadcrumb :deep(li:last-child .ant-breadcrumb-link) {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.header-user-trigger {
+  height: 40px;
+  padding: 4px 8px 4px 4px;
+  border-radius: 12px;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.46);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.header-user-trigger:hover {
+  color: #0f172a !important;
+  border-color: rgba(22, 119, 255, 0.24);
+  background: rgba(255, 255, 255, 0.72) !important;
+}
+
+.header-user-trigger :deep(.ant-btn-icon) {
+  display: none;
+}
+
+.header-user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(22, 119, 255, 0.9) 0%, rgba(124, 58, 237, 0.8) 100%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 30px;
+}
+
+.header-user-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  line-height: 1.15;
+}
+
+.header-user-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.header-user-role {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.header-user-chevron {
+  font-size: 11px;
+  color: #94a3b8;
 }
 </style>

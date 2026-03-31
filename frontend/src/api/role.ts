@@ -1,5 +1,5 @@
 import request from "./request";
-import type { ApiPageResp, ApiResp, RoleResp } from "./types";
+import type { ApiPageResp, ApiResp, RoleResp, UserResp } from "./types";
 
 export interface RoleCreateBody {
   code: string;
@@ -34,4 +34,8 @@ export function updateRole(id: string, body: RoleUpdateBody) {
 
 export function deleteRole(id: string) {
   return request.delete<ApiResp<boolean>>(`/api/v1/role/${id}`);
+}
+
+export function listRoleUsers(id: string) {
+  return request.get<ApiResp<UserResp[]>>(`/api/v1/role/${id}/user`);
 }

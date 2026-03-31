@@ -8,6 +8,7 @@ from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
 from app.db.schema import TbUser, TbUserGroup, TbUserGroupMember
+from app.model.user_model import UserResp
 from app.model.user_group_model import (
     UserGroupCreateReq,
     UserGroupMemberResp,
@@ -123,3 +124,31 @@ class UserGroupService:
             user_id=str(member.user_id),
             group_id=str(member.group_id),
         )
+
+    def list_members(self, db: Session, group_id: int) -> list[UserResp]:
+        if not db.get(TbUserGroup, group_id):
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, "group not found")
+
+        rows = db.scalars(
+            select(TbUser)
+            .join(TbUserGroupMember, TbUserGroupMember.user_id == TbUser.id)
+            .where(TbUserGroupMember.group_id == group_id)
+            .order_by(TbUser.create_time.desc())
+        ).all()
+        return [UserResp.from_entity(row) for row in rows]
+
+    def remove_member(self, db: Session, group_id: int, user_id: int) -> None:
+        if not db.get(TbUserGroup, group_id):
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, "group not found")
+
+        member = db.scalar(
+            select(TbUserGroupMember).where(
+                TbUserGroupMember.group_id == group_id,
+                TbUserGroupMember.user_id == user_id,
+            )
+        )
+        if not member:
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, "group member not found")
+
+        db.delete(member)
+        db.commit()

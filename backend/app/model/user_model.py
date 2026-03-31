@@ -12,6 +12,7 @@ class UserCreateReq(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=255)
     department: str | None = Field(default=None, max_length=255)
+    role_ids: list[str] = Field(default_factory=list)
 
 
 class UserPageReq(BaseModel):
@@ -25,6 +26,7 @@ class UserUpdateReq(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, max_length=255)
     department: str | None = Field(default=None, max_length=255)
+    role_ids: list[str] | None = None
 
 
 class UserResetPasswordReq(BaseModel):
@@ -42,6 +44,12 @@ class UserLoginResp(BaseModel):
     user: "UserResp"
 
 
+class UserRoleResp(BaseModel):
+    id: str
+    code: str
+    name: str
+
+
 class UserResp(BaseModel):
     id: str
     account: str
@@ -49,11 +57,12 @@ class UserResp(BaseModel):
     name: str | None = None
     phone: str | None = None
     department: str | None = None
+    roles: list[UserRoleResp] = Field(default_factory=list)
     create_time: int
     update_time: int
 
     @classmethod
-    def from_entity(cls, user: TbUser) -> "UserResp":
+    def from_entity(cls, user: TbUser, roles: list[UserRoleResp] | None = None) -> "UserResp":
         return cls(
             id=str(user.id),
             account=user.account,
@@ -61,6 +70,7 @@ class UserResp(BaseModel):
             name=user.name,
             phone=user.phone,
             department=user.department,
+            roles=roles or [],
             create_time=user.create_time,
             update_time=user.update_time,
         )

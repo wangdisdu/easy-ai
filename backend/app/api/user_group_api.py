@@ -15,6 +15,7 @@ from app.model.user_group_model import (
     UserGroupUpdateReq,
 )
 from app.service.user_group_service import UserGroupService
+from app.model.user_model import UserResp
 
 router = APIRouter(prefix="/user-group", tags=["user-group"])
 service = UserGroupService(SnowflakeGenerator(settings.snowflake_worker_id))
@@ -75,3 +76,21 @@ def add_user_group_member(
         db=db, group_id=int(group_id), user_id=int(req.user_id), req_ctx=req_ctx
     )
     return Resp(data=data)
+
+
+@router.get("/{group_id}/member", response_model=Resp[list[UserResp]])
+def list_user_group_members(
+    group_id: str,
+    db: Session = Depends(get_db),
+) -> Resp[list[UserResp]]:
+    return Resp(data=service.list_members(db=db, group_id=int(group_id)))
+
+
+@router.delete("/{group_id}/member/{user_id}", response_model=Resp[bool])
+def remove_user_group_member(
+    group_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+) -> Resp[bool]:
+    service.remove_member(db=db, group_id=int(group_id), user_id=int(user_id))
+    return Resp(data=True)

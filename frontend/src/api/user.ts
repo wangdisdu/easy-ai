@@ -8,6 +8,7 @@ export interface UserCreateBody {
   name?: string | null;
   phone?: string | null;
   department?: string | null;
+  role_ids?: string[];
 }
 
 export interface UserUpdateBody {
@@ -15,6 +16,7 @@ export interface UserUpdateBody {
   name?: string | null;
   phone?: string | null;
   department?: string | null;
+  role_ids?: string[];
 }
 
 export function pageUser(params: { page_no: number; page_size: number; keyword?: string }) {

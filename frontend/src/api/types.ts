@@ -18,6 +18,11 @@ export interface UserResp {
   name?: string | null;
   phone?: string | null;
   department?: string | null;
+  roles?: Array<{
+    id: string;
+    code: string;
+    name: string;
+  }>;
   create_time: number;
   update_time: number;
 }

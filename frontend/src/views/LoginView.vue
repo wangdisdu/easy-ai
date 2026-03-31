@@ -1,17 +1,24 @@
 <template>
   <div class="login-view">
     <section class="login-hero" aria-hidden="true">
+      <div class="login-hero-orbit login-hero-orbit--a" />
+      <div class="login-hero-orbit login-hero-orbit--b" />
       <div class="login-hero-grid" />
       <div class="login-hero-glow login-hero-glow--a" />
       <div class="login-hero-glow login-hero-glow--b" />
       <div class="login-hero-content">
-        <p class="login-hero-tag">SECURE ACCESS GATEWAY</p>
-        <h1 class="login-hero-title">easy-ai</h1>
-        <p class="login-hero-desc">企业智能应用平台 · 统一身份与权限</p>
+        <p class="login-hero-tag">ENTERPRISE AI CONTROL CENTER</p>
+        <h1 class="login-hero-title">智瞻 AI</h1>
+        <p class="login-hero-desc">面向企业场景的 AI 平台，统一承载智能助手、应用编排、知识资产与平台治理能力。</p>
+        <div class="login-hero-badge-row">
+          <span class="login-hero-badge">Agent Workspace</span>
+          <span class="login-hero-badge">Knowledge Fabric</span>
+          <span class="login-hero-badge">Secure Governance</span>
+        </div>
         <ul class="login-hero-meta">
-          <li><span class="login-hero-dot" />链路加密</li>
-          <li><span class="login-hero-dot" />会话令牌</li>
-          <li><span class="login-hero-dot" />审计就绪</li>
+          <li><span class="login-hero-dot" />统一身份认证</li>
+          <li><span class="login-hero-dot" />企业级权限控制</li>
+          <li><span class="login-hero-dot" />模型与应用治理</li>
         </ul>
       </div>
     </section>
@@ -19,10 +26,11 @@
     <section class="login-aside">
       <div class="login-panel">
         <div class="login-panel-frame" />
+        <div class="login-panel-scan" aria-hidden="true" />
         <header class="login-panel-head">
-          <p class="login-panel-kicker">AUTHENTICATION</p>
-          <h2 class="login-panel-title">系统登录</h2>
-          <p class="login-panel-sub">请输入控制台账号与密码</p>
+          <p class="login-panel-kicker">CONSOLE ACCESS</p>
+          <h2 class="login-panel-title">登录智瞻 AI</h2>
+          <p class="login-panel-sub">使用企业账号进入平台控制台，访问智能助手、应用工厂与平台管理能力。</p>
         </header>
 
         <form class="login-form" @submit.prevent="onSubmit">
@@ -35,11 +43,11 @@
               type="text"
               name="username"
               autocomplete="username"
-              placeholder="account / 工号"
+              placeholder="请输入企业账号 / 工号"
             />
           </div>
           <div class="login-field">
-            <label class="login-label" for="login-passwd">访问密钥</label>
+            <label class="login-label" for="login-passwd">登录密码</label>
             <input
               id="login-passwd"
               v-model="form.passwd"
@@ -47,15 +55,16 @@
               type="password"
               name="password"
               autocomplete="current-password"
-              placeholder="••••••••"
+              placeholder="请输入登录密码"
             />
           </div>
           <p v-if="fieldError" class="login-hint login-hint--err">{{ fieldError }}</p>
           <button class="login-submit" type="submit" :disabled="loading">
             <span v-if="loading" class="login-submit-loading" aria-hidden="true" />
-            <span>{{ loading ? "校验中…" : "进入控制台" }}</span>
+            <span>{{ loading ? "身份校验中…" : "进入智瞻 AI" }}</span>
           </button>
         </form>
+        <p class="login-panel-note">建议使用企业统一分配账号登录，所有操作将纳入平台审计记录。</p>
       </div>
     </section>
   </div>
@@ -110,7 +119,10 @@ async function onSubmit() {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(440px, 560px);
   font-family: "IBM Plex Sans", "PingFang SC", "Noto Sans SC", sans-serif;
-  background: #050810;
+  background:
+    radial-gradient(circle at top left, rgba(37, 99, 235, 0.2), transparent 28%),
+    radial-gradient(circle at 85% 85%, rgba(124, 58, 237, 0.16), transparent 30%),
+    #050810;
   color: #e8eef8;
 }
 
@@ -134,6 +146,29 @@ async function onSubmit() {
     border-bottom: 1px solid rgba(59, 130, 246, 0.12);
     min-height: 220px;
   }
+}
+
+.login-hero-orbit {
+  position: absolute;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.12);
+  pointer-events: none;
+}
+
+.login-hero-orbit--a {
+  width: 520px;
+  height: 520px;
+  top: -220px;
+  left: -120px;
+  transform: rotate(12deg);
+}
+
+.login-hero-orbit--b {
+  width: 340px;
+  height: 340px;
+  right: 8%;
+  bottom: -120px;
+  border-color: rgba(167, 139, 250, 0.14);
 }
 
 .login-hero-grid {
@@ -173,6 +208,7 @@ async function onSubmit() {
   position: relative;
   z-index: 1;
   max-width: 520px;
+  padding-top: clamp(12px, 5vh, 60px);
 }
 
 .login-hero-tag {
@@ -197,9 +233,31 @@ async function onSubmit() {
 
 .login-hero-desc {
   margin: 0 0 28px;
+  max-width: 560px;
   font-size: 15px;
-  line-height: 1.6;
-  color: rgba(200, 214, 236, 0.72);
+  line-height: 1.75;
+  color: rgba(200, 214, 236, 0.76);
+}
+
+.login-hero-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 26px;
+}
+
+.login-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  background: rgba(15, 23, 42, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: rgba(191, 219, 254, 0.9);
 }
 
 .login-hero-meta {
@@ -234,7 +292,8 @@ async function onSubmit() {
   align-items: center;
   justify-content: center;
   padding: clamp(24px, 5vw, 48px);
-  background: linear-gradient(180deg, #080c14 0%, #050810 100%);
+  background:
+    linear-gradient(180deg, rgba(6, 10, 20, 0.94) 0%, rgba(4, 8, 18, 1) 100%);
 }
 
 .login-panel {
@@ -242,12 +301,14 @@ async function onSubmit() {
   width: 100%;
   max-width: 520px;
   padding: 48px 44px 44px;
-  background: rgba(12, 18, 32, 0.72);
-  border: 1px solid rgba(99, 140, 220, 0.22);
-  border-radius: 4px;
+  background:
+    linear-gradient(180deg, rgba(12, 18, 32, 0.88) 0%, rgba(8, 14, 28, 0.78) 100%);
+  border: 1px solid rgba(99, 140, 220, 0.24);
+  border-radius: 20px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 24px 64px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(16px);
+  overflow: hidden;
 }
 
 .login-panel-frame {
@@ -255,7 +316,7 @@ async function onSubmit() {
   position: absolute;
   inset: 10px;
   border: 1px solid rgba(59, 130, 246, 0.08);
-  border-radius: 2px;
+  border-radius: 14px;
 }
 
 .login-panel-frame::before,
@@ -281,8 +342,18 @@ async function onSubmit() {
   border-width: 0 2px 2px 0;
 }
 
+.login-panel-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.08), transparent 18%, transparent 82%, rgba(124, 58, 237, 0.08));
+  mix-blend-mode: screen;
+}
+
 .login-panel-head {
   margin-bottom: 36px;
+  position: relative;
+  z-index: 1;
 }
 
 .login-panel-kicker {
@@ -295,7 +366,7 @@ async function onSubmit() {
 
 .login-panel-title {
   margin: 0 0 8px;
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 600;
   color: #f1f5f9;
 }
@@ -303,6 +374,7 @@ async function onSubmit() {
 .login-panel-sub {
   margin: 0;
   font-size: 13px;
+  line-height: 1.7;
   color: rgba(148, 163, 184, 0.9);
 }
 
@@ -310,6 +382,8 @@ async function onSubmit() {
   display: flex;
   flex-direction: column;
   gap: 22px;
+  position: relative;
+  z-index: 1;
 }
 
 .login-field {
@@ -329,14 +403,14 @@ async function onSubmit() {
 .login-input {
   width: 100%;
   box-sizing: border-box;
-  height: 48px;
-  padding: 0 16px;
+  height: 52px;
+  padding: 0 18px;
   font-family: "JetBrains Mono", "IBM Plex Sans", monospace;
   font-size: 14px;
   color: #e2e8f0;
-  background: rgba(5, 8, 16, 0.85);
-  border: 1px solid rgba(71, 85, 105, 0.55);
-  border-radius: 2px;
+  background: rgba(5, 8, 16, 0.72);
+  border: 1px solid rgba(71, 85, 105, 0.5);
+  border-radius: 14px;
   outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -347,7 +421,7 @@ async function onSubmit() {
 
 .login-input:focus {
   border-color: rgba(59, 130, 246, 0.65);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), 0 0 24px rgba(59, 130, 246, 0.08);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15), 0 0 24px rgba(59, 130, 246, 0.12);
 }
 
 .login-hint {
@@ -366,9 +440,9 @@ async function onSubmit() {
   align-items: center;
   justify-content: center;
   gap: 0;
-  height: 50px;
+  height: 54px;
   border: none;
-  border-radius: 2px;
+  border-radius: 14px;
   font-family: "JetBrains Mono", monospace;
   font-size: 13px;
   font-weight: 600;
@@ -376,14 +450,14 @@ async function onSubmit() {
   text-transform: uppercase;
   color: #0f172a;
   cursor: pointer;
-  background: linear-gradient(105deg, #38bdf8 0%, #3b82f6 48%, #6366f1 100%);
-  box-shadow: 0 4px 24px rgba(59, 130, 246, 0.35);
+  background: linear-gradient(105deg, #67e8f9 0%, #3b82f6 42%, #7c3aed 100%);
+  box-shadow: 0 10px 30px rgba(59, 130, 246, 0.28);
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
 .login-submit:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 8px 32px rgba(59, 130, 246, 0.45);
+  box-shadow: 0 14px 36px rgba(59, 130, 246, 0.38);
 }
 
 .login-submit:disabled {
@@ -401,6 +475,15 @@ async function onSubmit() {
   border-top-color: #0f172a;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+.login-panel-note {
+  position: relative;
+  z-index: 1;
+  margin: 18px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(148, 163, 184, 0.82);
 }
 
 @keyframes pulse-dot {

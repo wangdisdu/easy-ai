@@ -1,5 +1,5 @@
 import request from "./request";
-import type { ApiPageResp, ApiResp, UserGroupResp } from "./types";
+import type { ApiPageResp, ApiResp, UserGroupResp, UserResp } from "./types";
 
 export interface UserGroupCreateBody {
   code: string;
@@ -8,6 +8,10 @@ export interface UserGroupCreateBody {
 
 export interface UserGroupUpdateBody {
   name: string;
+}
+
+export interface UserGroupMemberAddBody {
+  user_id: string;
 }
 
 export function pageUserGroup(params: { page_no: number; page_size: number; keyword?: string }) {
@@ -28,4 +32,16 @@ export function updateUserGroup(id: string, body: UserGroupUpdateBody) {
 
 export function deleteUserGroup(id: string) {
   return request.delete<ApiResp<boolean>>(`/api/v1/user-group/${id}`);
+}
+
+export function listUserGroupMembers(id: string) {
+  return request.get<ApiResp<UserResp[]>>(`/api/v1/user-group/${id}/member`);
+}
+
+export function addUserGroupMember(id: string, body: UserGroupMemberAddBody) {
+  return request.post<ApiResp<boolean>>(`/api/v1/user-group/${id}/member`, body);
+}
+
+export function removeUserGroupMember(id: string, userId: string) {
+  return request.delete<ApiResp<boolean>>(`/api/v1/user-group/${id}/member/${userId}`);
 }
