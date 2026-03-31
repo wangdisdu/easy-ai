@@ -1,3 +1,6 @@
 [submodule "Flowise"]
 	path = Flowise
 	url = https://github.com/FlowiseAI/Flowise.git
+[submodule "languse"]
+	path = languse
+	url = https://github.com/langfuse/langfuse.git
