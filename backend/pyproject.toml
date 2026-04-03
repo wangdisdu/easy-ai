@@ -4,25 +4,56 @@ version = "0.1.0"
 description = "easy-ai backend service"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi",
-  "uvicorn[standard]",
-  "pydantic",
-  "pydantic-settings",
-  "sqlalchemy",
-  "python-jose[cryptography]",
-  "bcrypt>=4.0",
+  "fastapi==0.135.2",
+  "uvicorn[standard]==0.42.0",
+  "pydantic==2.12.5",
+  "pydantic-settings==2.13.1",
+  "jinja2==3.1.4",
+  "sqlalchemy==2.0.48",
+  "python-jose[cryptography]==3.5.0",
+  "bcrypt==5.0.0",
+  "litellm==1.83.0",
+  "langchain==1.2.0",
+  "langchain-core==1.2.2",
+  "langchain-openai==1.1.6",
+  "langgraph==1.0.5",
+  "langgraph-prebuilt==1.0.8",
+  "deepagents==0.3.1",
+  "mcp==1.27.0",
+  "httpx==0.28.1",
+  "httpx-sse==0.4.3",
+  "langfuse==4.0.6",
 ]
 
 [dependency-groups]
 dev = [
-  "black",
-  "ruff",
+  "black==26.3.1",
+  "ruff==0.15.8",
 ]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-lint.ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint]
+select = [
+  "E",     # pycodestyle errors
+  "W",     # pycodestyle warnings
+  "F",     # pyflakes
+  "I",     # isort
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "SIM",   # flake8-simplify
+  "T20",   # flake8-print
+]
+ignore = [
+  "RUF001", "RUF002", "RUF003",
+  "B008",   # FastAPI Depends() in default args is idiomatic
+  "UP046",  # Pydantic BaseModel + Generic[T] not yet safe to convert
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
 
 [tool.black]
 line-length = 100

@@ -14,7 +14,7 @@
             style="width: 320px"
             @search="onSearch"
           />
-          <a-button type="primary" class="perm-btn" @click="openCreate">新建用户</a-button>
+          <a-button type="primary" class="perm-btn" @click="openCreateForm">新建用户</a-button>
         </div>
       </div>
 
@@ -60,7 +60,7 @@
           <template v-else-if="column.key === 'action'">
             <a-space :size="4">
               <a-button type="link" size="small" @click="openDetail(record)">详情</a-button>
-              <a-button type="link" size="small" @click="openEdit(record)">编辑</a-button>
+              <a-button type="link" size="small" @click="openEditForm(record)">编辑</a-button>
               <a-popconfirm title="确定删除该用户？" @confirm="onDelete(record)">
                 <a-button type="link" size="small" danger>删除</a-button>
               </a-popconfirm>
@@ -92,7 +92,7 @@
 
     <a-modal
       v-model:open="formOpen"
-      :title="formMode === 'create' ? '新建用户' : '编辑用户'"
+      :title="isEdit ? '编辑用户' : '新建用户'"
       :confirm-loading="submitting"
       destroy-on-close
       :force-render="true"
@@ -104,10 +104,10 @@
         :rules="formRules"
         layout="vertical"
       >
-        <a-form-item v-if="formMode === 'create'" label="账号" name="account">
+        <a-form-item v-if="!isEdit" label="账号" name="account">
           <a-input v-model:value="formModel.account" />
         </a-form-item>
-        <a-form-item v-if="formMode === 'create'" label="密码" name="passwd">
+        <a-form-item v-if="!isEdit" label="密码" name="passwd">
           <a-input-password v-model:value="formModel.passwd" />
         </a-form-item>
         <a-form-item label="姓名" name="name">
@@ -157,15 +157,15 @@ const detailOpen = ref(false);
 const detail = ref<UserResp | null>(null);
 
 const formOpen = ref(false);
-const formMode = ref<"create" | "edit">("create");
 const formRef = ref<FormInstance>();
 const submitting = ref(false);
 const editingId = ref<string | null>(null);
+const isEdit = computed(() => editingId.value !== null);
 
 const roleLoading = ref(false);
 const roleOptions = ref<{ label: string; value: string }[]>([]);
 
-const formModel = reactive({
+const emptyForm = () => ({
   account: "",
   passwd: "",
   name: "",
@@ -175,9 +175,12 @@ const formModel = reactive({
   roleIds: [] as string[],
 });
 
+const formModel = reactive(emptyForm());
+
 const formRules = computed<Record<string, Rule[]>>(() => ({
-  account: formMode.value === "create" ? [{ required: true, message: "请输入账号" }] : [],
-  passwd: formMode.value === "create" ? [{ required: true, message: "请输入密码" }] : [],
+  account: isEdit.value ? [] : [{ required: true, message: "请输入账号" }],
+  passwd: isEdit.value ? [] : [{ required: true, message: "请输入密码" }],
+  name: [{ required: true, message: "请输入姓名" }],
 }));
 
 const columns = [
@@ -247,49 +250,24 @@ async function openDetail(record: UserResp) {
   detailOpen.value = true;
 }
 
-function resetForm() {
-  Object.assign(formModel, {
-    account: "",
-    passwd: "",
-    name: "",
-    phone: "",
-    email: "",
-    department: "",
-    roleIds: [],
-  });
+function openCreateForm() {
+  editingId.value = null;
+  Object.assign(formModel, emptyForm());
+  formOpen.value = true;
 }
 
-function fillForm(user: UserResp) {
-  Object.assign(formModel, {
+async function openEditForm(record: UserResp) {
+  editingId.value = record.id;
+  const { data } = await userApi.getUser(record.id);
+  const user = data.data;
+  Object.assign(formModel, emptyForm(), {
     account: user.account,
-    passwd: "",
     name: user.name ?? "",
     phone: user.phone ?? "",
     email: user.email ?? "",
     department: user.department ?? "",
-    roleIds: (user.roles ?? []).map((item) => item.id),
+    roleIds: (user.roles ?? []).map((r) => r.id),
   });
-}
-
-function openCreate() {
-  formMode.value = "create";
-  editingId.value = null;
-  resetForm();
-  formOpen.value = true;
-}
-
-async function openEdit(record: UserResp) {
-  formMode.value = "edit";
-  editingId.value = record.id;
-  fillForm(record);
-
-  try {
-    const { data } = await userApi.getUser(record.id);
-    fillForm(data.data);
-  } catch {
-    message.warning("用户详情加载失败，已使用列表数据填充");
-  }
-
   formOpen.value = true;
 }
 
@@ -303,23 +281,23 @@ async function submitForm() {
   submitting.value = true;
   try {
     const payload = {
-      email: formModel.email || undefined,
       name: formModel.name || undefined,
       phone: formModel.phone || undefined,
+      email: formModel.email || undefined,
       department: formModel.department || undefined,
       role_ids: formModel.roleIds,
     };
 
-    if (formMode.value === "create") {
+    if (isEdit.value) {
+      await userApi.updateUser(editingId.value!, payload);
+      message.success("更新成功");
+    } else {
       await userApi.createUser({
         account: formModel.account,
         passwd: formModel.passwd,
         ...payload,
       });
       message.success("创建成功");
-    } else if (editingId.value) {
-      await userApi.updateUser(editingId.value, payload);
-      message.success("更新成功");
     }
     formOpen.value = false;
     await loadList();

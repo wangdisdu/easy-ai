@@ -84,7 +84,7 @@
           <section class="perm-card perm-detail-panel">
             <div class="perm-card-head perm-card-head--compact">
               <div>
-                <h4 class="perm-card-title">拥有该角色的人员</h4>
+                <h4 class="perm-card-title">人员列表</h4>
                 <p class="perm-card-sub">当前已关联该角色的用户列表。</p>
               </div>
               <span class="perm-card-count">{{ roleUsers.length }} 人</span>

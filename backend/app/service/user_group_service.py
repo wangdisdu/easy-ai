@@ -8,7 +8,6 @@ from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
 from app.db.schema import TbUser, TbUserGroup, TbUserGroupMember
-from app.model.user_model import UserResp
 from app.model.user_group_model import (
     UserGroupCreateReq,
     UserGroupMemberResp,
@@ -16,6 +15,7 @@ from app.model.user_group_model import (
     UserGroupResp,
     UserGroupUpdateReq,
 )
+from app.model.user_model import UserResp
 
 
 class UserGroupService:

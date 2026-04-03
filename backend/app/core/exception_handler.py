@@ -34,13 +34,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=200, content=resp.model_dump())
 
     @app.exception_handler(ServiceError)
-    async def handle_service_error(_: Request, exc: ServiceError) -> JSONResponse:
-        if exc.cause is not None:
-            logger.exception("service error: %s", exc.msg, exc_info=exc.cause)
+    async def handle_service_error(request: Request, exc: ServiceError) -> JSONResponse:
+        logger.warning(
+            "%s %s -> ServiceError(code=%s, msg=%s)",
+            request.method,
+            request.url.path,
+            exc.code,
+            exc.msg,
+            exc_info=exc,
+        )
         resp = Resp(code=exc.code, msg=exc.msg)
         return JSONResponse(status_code=200, content=resp.model_dump())
 
     @app.exception_handler(Exception)
-    async def handle_unexpected_error(_: Request, __: Exception) -> JSONResponse:
+    async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception(
+            "%s %s -> unexpected error", request.method, request.url.path, exc_info=exc
+        )
         resp = Resp(code=ErrorCode.INTERNAL_ERROR, msg="internal server error")
         return JSONResponse(status_code=200, content=resp.model_dump())

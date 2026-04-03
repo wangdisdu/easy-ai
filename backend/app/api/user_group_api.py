@@ -14,8 +14,8 @@ from app.model.user_group_model import (
     UserGroupResp,
     UserGroupUpdateReq,
 )
-from app.service.user_group_service import UserGroupService
 from app.model.user_model import UserResp
+from app.service.user_group_service import UserGroupService
 
 router = APIRouter(prefix="/user-group", tags=["user-group"])
 service = UserGroupService(SnowflakeGenerator(settings.snowflake_worker_id))

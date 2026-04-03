@@ -16,7 +16,7 @@
             <div class="sider-brand-text">智瞻 AI</div>
             <div class="sider-brand-subtitle">Enterprise Platform</div>
           </div>
-          <span class="sider-brand-icon" aria-hidden="true">
+          <span v-else class="sider-brand-icon" aria-hidden="true">
             <img :src="logoAi" alt="" class="sider-brand-icon-image" />
           </span>
         </div>
@@ -91,8 +91,8 @@ import {
   RightOutlined,
 } from "@ant-design/icons-vue";
 import { useAuthStore } from "@/stores/auth";
-import AppIcon from "@/components/AppIcon.vue";
 import logoAi from "@/assets/icons/logo-ai.svg";
+import AppIcon from "@/components/AppIcon.vue";
 
 const route = useRoute();
 const router = useRouter();

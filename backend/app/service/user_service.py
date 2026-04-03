@@ -12,12 +12,12 @@ from app.core.snowflake import SnowflakeGenerator
 from app.db.schema import TbRole, TbUser, TbUserRole
 from app.model.user_model import (
     UserCreateReq,
-    UserPageReq,
     UserLoginReq,
     UserLoginResp,
-    UserRoleResp,
+    UserPageReq,
     UserResetPasswordReq,
     UserResp,
+    UserRoleResp,
     UserUpdateReq,
 )
 
@@ -30,12 +30,10 @@ class UserService:
         try:
             parsed = [int(role_id) for role_id in role_ids]
         except (TypeError, ValueError) as exc:
-            raise ServiceError(ErrorCode.BAD_REQUEST, "role id invalid", exc) from exc
+            raise ServiceError(ErrorCode.BAD_REQUEST, "role id invalid") from exc
         return list(dict.fromkeys(parsed))
 
-    def _load_user_roles(
-        self, db: Session, user_ids: list[int]
-    ) -> dict[int, list[UserRoleResp]]:
+    def _load_user_roles(self, db: Session, user_ids: list[int]) -> dict[int, list[UserRoleResp]]:
         role_map: dict[int, list[UserRoleResp]] = defaultdict(list)
         if not user_ids:
             return role_map
@@ -47,9 +45,7 @@ class UserService:
             .order_by(TbRole.create_time.desc())
         ).all()
         for user_id, role_id, role_code, role_name in rows:
-            role_map[user_id].append(
-                UserRoleResp(id=str(role_id), code=role_code, name=role_name)
-            )
+            role_map[user_id].append(UserRoleResp(id=str(role_id), code=role_code, name=role_name))
         return role_map
 
     def _sync_user_roles(
@@ -60,8 +56,7 @@ class UserService:
         req_ctx: RequestContext,
     ) -> None:
         existing_roles = {
-            role.id
-            for role in db.scalars(select(TbRole).where(TbRole.id.in_(role_ids))).all()
+            role.id for role in db.scalars(select(TbRole).where(TbRole.id.in_(role_ids))).all()
         }
         missing_role_ids = [role_id for role_id in role_ids if role_id not in existing_roles]
         if missing_role_ids:
