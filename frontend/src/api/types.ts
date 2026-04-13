@@ -101,9 +101,85 @@ export interface AppLogResp {
   response_status?: number | null;
   latency_ms?: number | null;
   error_message?: string | null;
+  langfuse_trace_id?: string | null;
+  total_tokens?: number | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
   request_payload?: unknown;
   response_payload?: unknown;
   create_time: number;
+}
+
+export interface StatDelta {
+  value: number | null;
+  compare: number | null;
+  delta_pct: number | null;
+  sub_label: string | null;
+}
+
+export interface OverviewStats {
+  total_requests: StatDelta;
+  success_rate: StatDelta;
+  p95_latency_ms: StatDelta;
+  total_tokens: StatDelta;
+}
+
+export interface AppTrendSeries {
+  app_id: string;
+  app_name: string;
+  color: string;
+  data: number[];
+}
+
+export interface TrendResp {
+  labels: string[];
+  total: number[];
+  apps: AppTrendSeries[];
+}
+
+export interface ModelTokenRow {
+  model: string;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost: number | null;
+}
+
+export interface AppHealthRow {
+  app_id: string;
+  app_name: string;
+  app_type: string;
+  calls: number;
+  success_rate: number;
+  p95_latency_ms: number | null;
+  avg_latency_ms: number | null;
+  total_tokens: number;
+  feedback_rate: number | null;
+  trend: number[];
+}
+
+export interface ErrorAppRow {
+  app_id: string;
+  app_name: string;
+  app_type: string;
+  errors: number;
+  error_rate: number;
+  top_error: string | null;
+}
+
+export interface RecentRequestRow {
+  id: string;
+  app_id: string | null;
+  app_name: string | null;
+  app_type: string | null;
+  user_id: string | null;
+  preview: string;
+  latency_ms: number | null;
+  total_tokens: number | null;
+  success: boolean;
+  create_time: number;
+  langfuse_trace_id: string | null;
+  feedback: string | null;
 }
 
 export interface BuiltinToolResp {

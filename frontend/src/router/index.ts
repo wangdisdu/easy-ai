@@ -122,7 +122,7 @@ const router = createRouter({
             title: "可观测性",
             menu: { title: "可观测性", icon: "eye", order: 6 },
           },
-          component: () => import("@/views/MockFeatureView.vue"),
+          component: () => import("@/views/observability/ObservabilityView.vue"),
         },
         {
           path: "setting",

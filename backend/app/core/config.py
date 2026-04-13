@@ -1,5 +1,4 @@
 from langfuse import Langfuse
-from langfuse.langchain import CallbackHandler
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,12 +26,10 @@ class Settings(BaseSettings):
 settings = Settings()
 
 langfuse = None
-langfuse_handler = None
 
 if settings.langfuse_enabled:
     langfuse = Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        host=settings.langfuse_host,
+        public_key = settings.langfuse_public_key,
+        secret_key = settings.langfuse_secret_key,
+        host = settings.langfuse_host,
     )
-    langfuse_handler = CallbackHandler()

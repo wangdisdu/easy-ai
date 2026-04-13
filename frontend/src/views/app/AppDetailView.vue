@@ -316,34 +316,82 @@
     <a-drawer
       v-model:open="logDetailOpen"
       title="消息详情"
-      width="640"
+      width="720"
       destroy-on-close
     >
+      <template #extra>
+        <a-segmented v-model:value="logViewMode" :options="[{ label: '格式化', value: 'formatted' }, { label: '原始格式', value: 'raw' }]" size="small" />
+      </template>
+
       <div v-if="currentLog" class="log-detail">
-        <div class="log-detail-meta">
-          <div class="log-meta">
-            <span :class="['log-type', `log-type--${currentLog.request_type}`]">
-              {{ requestTypeLabel[currentLog.request_type] || currentLog.request_type }}
-            </span>
-            <span :class="['log-status', currentLog.success ? 'log-status--success' : 'log-status--error']">
-              {{ currentLog.success ? "成功" : "失败" }}
-            </span>
-            <span class="log-time">{{ formatMs(currentLog.create_time) }}</span>
+        <!-- 原始格式 -->
+        <template v-if="logViewMode === 'raw'">
+          <div class="config-block">
+            <div class="config-label">请求</div>
+            <pre class="prompt-block">{{ stringifyJson(currentLog.request_payload ?? {}) }}</pre>
           </div>
-          <div class="log-side">
-            <span>{{ currentLog.model || "-" }}</span>
-            <span>{{ currentLog.latency_ms ?? "-" }} ms</span>
+          <div class="config-block">
+            <div class="config-label">响应</div>
+            <pre class="prompt-block">{{ stringifyJson(currentLog.response_payload ?? {}) }}</pre>
           </div>
-        </div>
-        <div v-if="currentLog.error_message" class="log-error">{{ currentLog.error_message }}</div>
-        <div class="config-block">
-          <div class="config-label">请求</div>
-          <pre class="prompt-block">{{ stringifyJson(currentLog.request_payload ?? {}) }}</pre>
-        </div>
-        <div class="config-block">
-          <div class="config-label">响应</div>
-          <pre class="prompt-block">{{ stringifyJson(currentLog.response_payload ?? {}) }}</pre>
-        </div>
+        </template>
+
+        <!-- 格式化展示 -->
+        <template v-else>
+          <!-- 概览 -->
+          <div class="log-overview">
+            <div class="log-overview-row">
+              <span class="log-overview-label">Trace ID</span>
+              <span class="log-overview-value log-overview-mono">{{ currentLog.langfuse_trace_id || "-" }}</span>
+            </div>
+            <div class="log-overview-row">
+              <span class="log-overview-label">时间</span>
+              <span class="log-overview-value">{{ formatMs(currentLog.create_time) }}</span>
+            </div>
+            <div class="log-overview-row">
+              <span class="log-overview-label">状态</span>
+              <span :class="['log-status', currentLog.success ? 'log-status--success' : 'log-status--error']">
+                {{ currentLog.success ? "成功" : "失败" }}
+              </span>
+            </div>
+            <div class="log-overview-row">
+              <span class="log-overview-label">模型</span>
+              <span class="log-overview-value">{{ currentLog.model || "-" }}</span>
+            </div>
+            <div class="log-overview-row">
+              <span class="log-overview-label">耗时</span>
+              <span class="log-overview-value">{{ currentLog.latency_ms ?? "-" }} ms</span>
+            </div>
+            <div class="log-overview-row">
+              <span class="log-overview-label">Token 用量</span>
+              <span class="log-overview-value">
+                总计 {{ currentLog.total_tokens ?? "-" }} (输入 {{ currentLog.input_tokens ?? "-" }} / 输出 {{ currentLog.output_tokens ?? "-" }})
+              </span>
+            </div>
+          </div>
+
+          <div v-if="currentLog.error_message" class="log-error">{{ currentLog.error_message }}</div>
+
+          <!-- 消息列表 -->
+          <div class="msg-list">
+            <div v-for="(msg, idx) in parsedMessages" :key="idx" :class="['msg-card', `msg-card--${msg.type}`]">
+              <div class="msg-header">
+                <span :class="['msg-type-badge', `msg-type-badge--${msg.type}`]">{{ msgTypeLabel[msg.type] || msg.type }}</span>
+                <span v-if="msg.tokens.total !== null" class="msg-tokens">
+                  {{ msg.tokens.total }} tokens (入 {{ msg.tokens.input ?? "-" }} / 出 {{ msg.tokens.output ?? "-" }})
+                </span>
+              </div>
+              <div v-if="msg.toolCalls && msg.toolCalls.length" class="msg-tool-calls">
+                <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="msg-tool-call">
+                  <span class="msg-tool-name">{{ tc.name }}</span>
+                  <pre class="msg-tool-args">{{ stringifyJson(tc.args) }}</pre>
+                </div>
+              </div>
+              <div v-if="msg.content" class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+              <div v-else-if="!msg.toolCalls?.length" class="msg-content msg-content--empty">（无文本内容）</div>
+            </div>
+          </div>
+        </template>
       </div>
     </a-drawer>
   </div>
@@ -354,6 +402,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeftOutlined, RightOutlined } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
+import { marked } from "marked";
 import * as appApi from "@/api/app";
 import * as llmApi from "@/api/llm";
 import type { AppLogResp, AppResp, AppRunResp, AppVersionResp } from "@/api/types";
@@ -378,7 +427,50 @@ const agentTestMessage = ref("");
 const llmTestInputs = reactive<Record<string, string | number | undefined>>({});
 const logDetailOpen = ref(false);
 const currentLog = ref<AppLogResp | null>(null);
+const logViewMode = ref<"formatted" | "raw">("formatted");
 const publishForm = reactive({ version: "", version_note: "" });
+
+const msgTypeLabel: Record<string, string> = {
+  human: "用户",
+  ai: "AI",
+  tool: "工具",
+  system: "系统",
+};
+
+interface ParsedMessage {
+  type: string;
+  content: string;
+  toolCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+  tokens: { total: number | null; input: number | null; output: number | null };
+}
+
+const parsedMessages = computed<ParsedMessage[]>(() => {
+  const resp = currentLog.value?.response_payload as Record<string, unknown> | null;
+  if (!resp) return [];
+  const result = resp.result as Record<string, unknown> | undefined;
+  if (!result) return [];
+  const messages = result.messages as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(messages)) return [];
+
+  return messages.map((msg) => {
+    const usage = msg.usage_metadata as Record<string, number> | undefined;
+    const toolCalls = msg.tool_calls as Array<{ name: string; args: Record<string, unknown> }> | undefined;
+    return {
+      type: (msg.type as string) || "unknown",
+      content: typeof msg.content === "string" ? msg.content : "",
+      toolCalls: toolCalls?.length ? toolCalls : undefined,
+      tokens: {
+        total: usage?.total_tokens ?? null,
+        input: usage?.input_tokens ?? null,
+        output: usage?.output_tokens ?? null,
+      },
+    };
+  });
+});
+
+function renderMarkdown(text: string): string {
+  return marked(text) as string;
+}
 
 const appTypeLabel: Record<string, string> = {
   llm: "LLM 应用",
@@ -1142,13 +1234,210 @@ onMounted(() => {
 }
 
 .log-error {
-  margin-top: 12px;
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(239, 68, 68, 0.08);
   color: #b91c1c;
   font-size: 12px;
   line-height: 1.6;
+}
+
+/* 概览 */
+.log-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.84);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.log-overview-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.log-overview-label {
+  flex-shrink: 0;
+  width: 72px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.log-overview-value {
+  color: #1e293b;
+}
+
+.log-overview-mono {
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* 消息列表 */
+.msg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.msg-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: #fff;
+}
+
+.msg-card--human {
+  border-left: 3px solid #2563eb;
+}
+
+.msg-card--ai {
+  border-left: 3px solid #8b5cf6;
+}
+
+.msg-card--tool {
+  border-left: 3px solid #f59e0b;
+}
+
+.msg-card--system {
+  border-left: 3px solid #64748b;
+}
+
+.msg-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.msg-type-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.msg-type-badge--human {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.msg-type-badge--ai {
+  background: rgba(139, 92, 246, 0.12);
+  color: #6d28d9;
+}
+
+.msg-type-badge--tool {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+
+.msg-type-badge--system {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+}
+
+.msg-tokens {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.msg-content {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #334155;
+  word-break: break-word;
+}
+
+.msg-content :deep(p) {
+  margin: 0 0 8px;
+}
+
+.msg-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.msg-content :deep(h1),
+.msg-content :deep(h2),
+.msg-content :deep(h3) {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.msg-content :deep(ul),
+.msg-content :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.msg-content :deep(code) {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.06);
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+
+.msg-content :deep(pre) {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.msg-content :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.msg-content--empty {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.msg-tool-calls {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msg-tool-call {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.18);
+}
+
+.msg-tool-name {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #b45309;
+}
+
+.msg-tool-args {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #475569;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .log-payload-grid {

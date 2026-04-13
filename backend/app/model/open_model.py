@@ -31,6 +31,10 @@ class AppLogResp(BaseModel):
     response_status: int | None = None
     latency_ms: int | None = None
     error_message: str | None = None
+    langfuse_trace_id: str | None = None
+    total_tokens: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     request_payload: Any = None
     response_payload: Any = None
     create_time: int

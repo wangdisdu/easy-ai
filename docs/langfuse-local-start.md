@@ -91,7 +91,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 
 ## 7. 初始化数据库
 
-按顺序执行（均在 `languse` 根目录）：
+按顺序执行（均在 `langfuse` 根目录）：
 
 ```bash
 pnpm --filter=shared run db:reset

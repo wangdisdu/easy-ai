@@ -3,11 +3,13 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from langfuse import propagate_attributes
+from langfuse.langchain import CallbackHandler
 from sqlalchemy.orm import Session
 
 from app.app.app_runtime import AppRuntime
 from app.app.langchain_util import LangChainUtil
-from app.core.config import langfuse_handler, settings
+from app.core.config import settings
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
@@ -54,15 +56,26 @@ class LlmApp:
 
         final_messages = req.messages or self._build_messages_from_inputs(app_config, req.inputs)
         payload = {"messages": [message.model_dump() for message in final_messages]}
+        observation_metadata = {
+            "app_id": str(app.id),
+            "app_name": app.name,
+            "app_type": app.app_type,
+            "request_type": request_type,
+        }
+        handler = CallbackHandler()
         started_at = time.perf_counter()
         try:
-            result = agent.invoke(payload, config={"callbacks": [langfuse_handler]})
+            with propagate_attributes(metadata=observation_metadata):
+                result = agent.invoke(payload, config={"callbacks": [handler]})
             latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = handler.last_trace_id
+            serialized_result = self._langchain_util.serialize_result(result)
+            token_usage = self._langchain_util.extract_token_usage(serialized_result)
             response = {
                 "app_id": str(app.id),
                 "app_type": app.app_type,
                 "model": runtime_config.model,
-                "result": result,
+                "result": serialized_result,
                 "latency_ms": latency_ms,
             }
             self._log_service.create_log(
@@ -79,12 +92,17 @@ class LlmApp:
                 response_status=200,
                 latency_ms=latency_ms,
                 error_message=None,
+                langfuse_trace_id=trace_id,
+                total_tokens=token_usage["total_tokens"],
+                input_tokens=token_usage["input_tokens"],
+                output_tokens=token_usage["output_tokens"],
                 now=req_ctx.request_time_ms,
                 user_id=req_ctx.user_id,
             )
             return response
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = handler.last_trace_id
             self._log_service.create_log(
                 db,
                 app_id=app.id,
@@ -99,6 +117,10 @@ class LlmApp:
                 response_status=None,
                 latency_ms=latency_ms,
                 error_message=str(exc),
+                langfuse_trace_id=trace_id,
+                total_tokens=None,
+                input_tokens=None,
+                output_tokens=None,
                 now=req_ctx.request_time_ms,
                 user_id=req_ctx.user_id,
             )

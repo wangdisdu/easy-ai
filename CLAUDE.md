@@ -11,7 +11,7 @@ easy-ai (智瞻 AI) is an enterprise AI platform with modules for RAG (via RAGFl
 - `backend/` — Python 3.12 FastAPI backend
 - `frontend/` — Vue 3 + TypeScript frontend (Ant Design Vue, Pinia, Vite)
 - `Flowise/` — Git submodule: FlowiseAI agent orchestration
-- `languse/` — Git submodule: Langfuse observability
+- `langfuse/` — Git submodule: Langfuse observability
 - `docs/` — Architecture and design docs
 - `eoitek-llm/` — Product prototype design, used as UI/UX reference for frontend development
 
