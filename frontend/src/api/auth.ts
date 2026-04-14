@@ -8,3 +8,7 @@ export function login(account: string, passwd: string) {
 export function fetchMe() {
   return request.get<ApiResp<UserResp>>("/api/v1/auth/me");
 }
+
+export function logout() {
+  return request.post<ApiResp<null>>("/api/v1/auth/logout");
+}

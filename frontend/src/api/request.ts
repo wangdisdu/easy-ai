@@ -5,14 +5,7 @@ import type { ApiResp } from "./types";
 const request = axios.create({
   baseURL: import.meta.env.VITE_API_BASE ?? "",
   timeout: 30_000,
-});
-
-request.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access_token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,
 });
 
 request.interceptors.response.use(
@@ -25,6 +18,13 @@ request.interceptors.response.use(
     return res;
   },
   (err) => {
+    if (err?.response?.status === 401) {
+      const path = window.location.pathname;
+      if (path !== "/login") {
+        window.location.replace(`/login?redirect=${encodeURIComponent(path)}`);
+      }
+      return Promise.reject(err);
+    }
     message.error(err?.message || "网络错误");
     return Promise.reject(err);
   },

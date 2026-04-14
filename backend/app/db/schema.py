@@ -216,6 +216,8 @@ class TbApp(Base):
     enable_log: Mapped[int] = mapped_column(Integer, nullable=False)
     version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     current_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Flowise chatflow uuid，仅 app_type=agent_flow 时写入
+    flowise_chatflow_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

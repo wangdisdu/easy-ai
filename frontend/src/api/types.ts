@@ -66,6 +66,7 @@ export interface AppResp {
   enable_log?: boolean | null;
   version_id?: string | null;
   current_version?: string | null;
+  flowise_chatflow_id?: string | null;
   tool_ids?: string[];
   skill_ids?: string[];
   create_time: number;

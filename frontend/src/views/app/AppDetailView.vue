@@ -39,7 +39,27 @@
           </div>
         </div>
 
-        <div class="hero-metrics">
+        <div v-if="app.app_type === 'agent_flow'" class="hero-metrics">
+          <div class="metric-card">
+            <span class="metric-label">访问范围</span>
+            <span class="metric-value metric-value--small">
+              {{ accessScopeLabel[app.access_scope || ""] || app.access_scope || "-" }}
+            </span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">限流</span>
+            <span class="metric-value metric-value--small">{{ app.rate_limit ?? "-" }} 次/分</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">调用日志</span>
+            <span class="metric-value metric-value--small">{{ app.enable_log ? "已启用" : "未启用" }}</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">版本</span>
+            <span class="metric-value metric-value--small">{{ app.current_version || "未发布" }}</span>
+          </div>
+        </div>
+        <div v-else class="hero-metrics">
           <div class="metric-card">
             <span class="metric-label">访问范围</span>
             <span class="metric-value metric-value--small">
@@ -63,6 +83,15 @@
 
       <div class="hero-actions">
         <a-button @click="router.push(`/app/${app.id}/edit`)">编辑</a-button>
+        <a-button
+          v-if="app.app_type === 'agent_flow'"
+          type="primary"
+          :disabled="!app.flowise_chatflow_id"
+          :title="app.flowise_chatflow_id ? '' : '未关联 Flowise 画布'"
+          @click="openFlowiseCanvas"
+        >
+          打开画布
+        </a-button>
         <a-button v-if="['llm', 'agent'].includes(app.app_type)" @click="openTestDrawer">测试</a-button>
         <a-button v-if="app.app_status === 'published'" @click="onOffline">下线</a-button>
         <a-button v-if="app.app_status === 'offline'" type="primary" @click="openPublish">上线</a-button>
@@ -76,6 +105,69 @@
 
     <a-tabs v-model:activeKey="activeTab" class="detail-tabs">
       <a-tab-pane key="config" tab="应用配置">
+        <!-- agent_flow 专属布局：不展示模型/Temperature/Max Tokens 等无关字段，强调画布关联 -->
+        <template v-if="app.app_type === 'agent_flow'">
+          <section class="panel-card panel-card--full">
+            <div class="panel-head">
+              <div>
+                <h3 class="panel-title">基础信息</h3>
+                <p class="panel-sub">应用基本属性与平台接入策略。</p>
+              </div>
+            </div>
+            <div class="kv-grid">
+              <div class="kv-item">
+                <span class="kv-label">应用类型</span>
+                <span class="kv-value">{{ appTypeLabel[app.app_type] || app.app_type }}</span>
+              </div>
+              <div class="kv-item">
+                <span class="kv-label">访问范围</span>
+                <span class="kv-value">{{ accessScopeLabel[app.access_scope || ""] || app.access_scope || "-" }}</span>
+              </div>
+              <div class="kv-item">
+                <span class="kv-label">限流</span>
+                <span class="kv-value">{{ app.rate_limit ?? "-" }} 次/分</span>
+              </div>
+              <div class="kv-item">
+                <span class="kv-label">调用日志</span>
+                <span class="kv-value">{{ app.enable_log ? "已启用" : "未启用" }}</span>
+              </div>
+              <div class="kv-item">
+                <span class="kv-label">创建时间</span>
+                <span class="kv-value">{{ formatMs(app.create_time) }}</span>
+              </div>
+              <div class="kv-item">
+                <span class="kv-label">最近更新</span>
+                <span class="kv-value">{{ formatMs(app.update_time) }}</span>
+              </div>
+            </div>
+            <div v-if="app.description" class="agent-flow-desc">
+              <div class="agent-flow-desc-label">应用描述</div>
+              <div class="agent-flow-desc-text">{{ app.description }}</div>
+            </div>
+          </section>
+
+          <section class="panel-card panel-card--full">
+            <div class="panel-head">
+              <div>
+                <h3 class="panel-title">版本历史</h3>
+                <p class="panel-sub">应用发布记录与版本说明。</p>
+              </div>
+            </div>
+            <div v-if="versions.length" class="version-list">
+              <div v-for="version in versions" :key="version.id" class="version-item">
+                <div>
+                  <div class="version-name">{{ version.version }}</div>
+                  <div class="version-note">{{ version.version_note || "无版本说明" }}</div>
+                </div>
+                <span class="version-time">{{ formatMs(version.published_time) }}</span>
+              </div>
+            </div>
+            <a-empty v-else :image="false" description="暂无版本记录" />
+          </section>
+        </template>
+
+        <!-- 其它应用类型保持原有布局 -->
+        <template v-else>
         <div class="overview-grid">
           <section class="panel-card">
             <div class="panel-head">
@@ -155,6 +247,7 @@
           </div>
           <a-empty v-else :image="false" description="暂无版本记录" />
         </section>
+        </template>
       </a-tab-pane>
 
       <a-tab-pane key="history" tab="历史消息">
@@ -511,7 +604,7 @@ const typeConfigTitle: Record<string, string> = {
   llm: "输入变量、提示词模板与输出配置。",
   nl2sql: "数据库连接与 Schema 描述。",
   agent: "工具、技能、行为参数与子智能体配置。",
-  agent_flow: "流程实例与编排元数据配置。",
+  agent_flow: "Agent Flow 画布在 Flowise 中编辑，点击「打开画布」进入。",
 };
 
 const showApiDocsTab = computed(() => app.value?.app_status === "published");
@@ -557,13 +650,7 @@ const summaryRows = computed(() => {
       { label: "自动执行", value: config.allow_auto_exec ? "允许" : "需确认" },
     ];
   }
-  if (app.value.app_type === "agent_flow") {
-    return [
-      { label: "流程实例", value: String(config.flow_instance || "-") },
-      { label: "流程 ID", value: String(config.flow_id || "-") },
-      { label: "同步 Trace", value: config.flow_sync_trace ? "是" : "否" },
-    ];
-  }
+  // agent_flow 的画布与配置完全在 Flowise 维护,easy-ai 详情页不展示编排元数据
   return [];
 });
 
@@ -669,6 +756,13 @@ function openTestDrawer() {
   if (app.value?.app_type === "agent" && !agentTestMessage.value.trim()) {
     agentTestMessage.value = "";
   }
+}
+
+function openFlowiseCanvas() {
+  const id = app.value?.flowise_chatflow_id;
+  if (!id) return;
+  // popup 打开 Flowise Agent Flow v2 画布(URL 经 easy-ai 反代,自动带 cookie)
+  window.open(`/flowise/v2/agentcanvas/${id}`, "_blank", "noopener");
 }
 
 function syncLlmTestInputs() {
@@ -1074,6 +1168,27 @@ onMounted(() => {
   color: #0f172a;
   font-size: 14px;
   line-height: 1.7;
+}
+
+.agent-flow-desc {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: rgba(248, 250, 252, 0.84);
+}
+
+.agent-flow-desc-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.agent-flow-desc-text {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #0f172a;
+  white-space: pre-wrap;
 }
 
 .empty-note {

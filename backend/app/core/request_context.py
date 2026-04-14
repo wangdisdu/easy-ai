@@ -13,11 +13,21 @@ class RequestContext(BaseModel):
     request_time_ms: int
 
 
-def build_request_context(request: Request) -> RequestContext:
-    user_id: int | None = None
+def _extract_token(request: Request) -> str | None:
+    # 优先 cookie（前端浏览器流量），回退 Bearer（curl/SDK/CLI）
+    cookie_token = request.cookies.get("easyai_token")
+    if cookie_token:
+        return cookie_token
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
-        token = auth[7:].strip()
+        return auth[7:].strip()
+    return None
+
+
+def build_request_context(request: Request) -> RequestContext:
+    user_id: int | None = None
+    token = _extract_token(request)
+    if token:
         try:
             payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
             sub = payload.get("sub")

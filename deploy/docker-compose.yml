@@ -1,0 +1,75 @@
+# easy-ai 主 compose
+#
+# 本文件只定义 easy-ai 自己的服务(backend / frontend / flowise)。
+# Langfuse 通过 deploy.sh 在启动时用 `-f ../langfuse/docker-compose.yml` 链式合并,
+# 不在这里 include(避免依赖 compose >= 2.20)。
+#
+# 直接使用本文件:
+#   docker compose -p easy-ai \
+#     -f deploy/docker-compose.yml \
+#     -f langfuse/docker-compose.yml \
+#     --env-file deploy/.env up -d --build
+
+services:
+  easy-ai-backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: easy-ai-backend
+    restart: unless-stopped
+    environment:
+      APP_NAME: easy-ai-backend
+      APP_ENV: prod
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: sqlite:////srv/easy-ai-backend/data/easy_ai.db
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ALGORITHM: HS256
+      SNOWFLAKE_WORKER_ID: ${SNOWFLAKE_WORKER_ID:-1}
+      # Langfuse(指向链式合并进来的 langfuse-web 服务名)
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
+      LANGFUSE_HOST: http://langfuse-web:3000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      # Flowise
+      FLOWISE_ENABLED: "true"
+      FLOWISE_INTERNAL_URL: http://flowise:3001
+      FLOWISE_SHARED_SECRET: ${FLOWISE_SHARED_SECRET}
+      FLOWISE_DEFAULT_WORKSPACE: ""
+    volumes:
+      - easy-ai-data:/srv/easy-ai-backend/data
+    depends_on:
+      - flowise
+
+  easy-ai-frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: easy-ai-frontend
+    restart: unless-stopped
+    ports:
+      - "${EASYAI_HTTP_PORT:-5173}:80"
+    depends_on:
+      - easy-ai-backend
+
+  flowise:
+    build:
+      context: ../Flowise
+      dockerfile: Dockerfile
+    container_name: easy-ai-flowise
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      EASYAI_TRUSTED_HEADER: "true"
+      EASYAI_SHARED_SECRET: ${FLOWISE_SHARED_SECRET}
+      IFRAME_ORIGINS: "*"
+      DATABASE_PATH: /root/.flowise
+      SECRETKEY_PATH: /root/.flowise
+      LOG_PATH: /root/.flowise/logs
+      BLOB_STORAGE_PATH: /root/.flowise/storage
+      DISABLE_FLOWISE_TELEMETRY: "true"
+    volumes:
+      - flowise-data:/root/.flowise
+
+volumes:
+  easy-ai-data:
+  flowise-data:

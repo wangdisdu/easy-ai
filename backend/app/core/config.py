@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = Field(default=None)
     langfuse_secret_key: str | None = Field(default=None)
 
+    # Flowise 嵌入接入（M1）
+    flowise_enabled: bool = Field(default=False)
+    flowise_internal_url: str = Field(default="http://127.0.0.1:3001")
+    flowise_shared_secret: str = Field(default="change-me-easyai-flowise")
+    flowise_default_workspace: str = Field(default="")
+
 
 settings = Settings()
 

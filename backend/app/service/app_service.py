@@ -1,13 +1,18 @@
 import json
+import logging
 from typing import Any
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
+from app.integration import flowise_client
+
+logger = logging.getLogger(__name__)
 from app.db.schema import (
     TbApp,
     TbAppSkill,
@@ -49,6 +54,19 @@ class AppService:
         app_config_payload = self._build_app_config(base_config=req.app_config)
         now = req_ctx.request_time_ms
 
+        # agent_flow: 先在 Flowise 创建空 chatflow 拿到 id;失败直接抛出,不入库
+        flowise_chatflow_id: str | None = None
+        if app_type == "agent_flow":
+            if not settings.flowise_enabled:
+                raise ServiceError(ErrorCode.BAD_REQUEST, "flowise integration disabled")
+            try:
+                flowise_chatflow_id = flowise_client.create_agentflow(
+                    name=req.name, user_id=req_ctx.user_id or 0
+                )
+            except flowise_client.FlowiseClientError as e:
+                logger.error("create flowise chatflow failed: %s", e)
+                raise ServiceError(ErrorCode.BAD_REQUEST, f"flowise create failed: {e}") from e
+
         entity = TbApp(
             id=self._id_generator.next_id(),
             name=req.name,
@@ -71,6 +89,7 @@ class AppService:
             enable_log=1 if req.enable_log is None or req.enable_log else 0,
             version_id=None,
             current_version=None,
+            flowise_chatflow_id=flowise_chatflow_id,
             create_time=now,
             update_time=now,
             create_user=req_ctx.user_id,
@@ -79,7 +98,14 @@ class AppService:
         db.add(entity)
         db.flush()
         self._sync_app_bindings(db, entity.id, app_type, req.tool_ids, req.skill_ids, req_ctx)
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            # 入库失败需要把刚刚在 Flowise 创建的 chatflow 也回滚掉,避免孤儿
+            db.rollback()
+            if flowise_chatflow_id:
+                flowise_client.delete_chatflow(flowise_chatflow_id, req_ctx.user_id or 0)
+            raise
         db.refresh(entity)
         return self._to_app_resp(db, entity)
 
@@ -134,6 +160,8 @@ class AppService:
             incoming_model_id or None,
         )
 
+        # 记录原名,供 agent_flow 重命名同步判断
+        original_name = entity.name
         if req.name is not None:
             entity.name = req.name
         if req.description is not None:
@@ -178,17 +206,33 @@ class AppService:
         entity.update_user = req_ctx.user_id
         db.commit()
         db.refresh(entity)
+
+        # agent_flow 名称变更同步到 Flowise(best-effort,失败不影响 easy-ai 侧)
+        if (
+            normalize_app_type(entity.app_type) == "agent_flow"
+            and entity.flowise_chatflow_id
+            and entity.name != original_name
+        ):
+            flowise_client.rename_chatflow(
+                entity.flowise_chatflow_id, entity.name, req_ctx.user_id or 0
+            )
+
         return self._to_app_resp(db, entity)
 
-    def delete_app(self, db: Session, app_id: int) -> None:
+    def delete_app(self, db: Session, app_id: int, req_ctx: RequestContext | None = None) -> None:
         entity = db.get(TbApp, app_id)
         if not entity:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "app not found")
+        flowise_chatflow_id = entity.flowise_chatflow_id
         db.query(TbAppVersion).filter(TbAppVersion.app_id == app_id).delete()
         db.query(TbAppTool).filter(TbAppTool.app_id == app_id).delete()
         db.query(TbAppSkill).filter(TbAppSkill.app_id == app_id).delete()
         db.delete(entity)
         db.commit()
+        # best-effort:本地删除成功后再清 Flowise 侧,失败仅 warn(已在 client 内打日志)
+        if flowise_chatflow_id:
+            user_id = (req_ctx.user_id if req_ctx else None) or 0
+            flowise_client.delete_chatflow(flowise_chatflow_id, user_id)
 
     def publish_app(
         self, db: Session, app_id: int, req: AppPublishReq, req_ctx: RequestContext

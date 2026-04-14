@@ -164,14 +164,9 @@ function onBrandClick() {
 }
 
 async function onLogout() {
-  auth.logout();
+  await auth.logout();
   await router.push("/login");
 }
-
-auth.loadProfile().catch(async () => {
-  auth.logout();
-  await router.replace({ path: "/login", query: { redirect: route.fullPath } });
-});
 </script>
 
 <style scoped>

@@ -70,8 +70,12 @@ def update_app(
 
 
 @router.delete("/{app_id}", response_model=Resp[bool])
-def delete_app(app_id: str, db: Session = Depends(get_db)) -> Resp[bool]:
-    service.delete_app(db=db, app_id=int(app_id))
+def delete_app(
+    app_id: str,
+    req_ctx: RequestContext = Depends(build_request_context),
+    db: Session = Depends(get_db),
+) -> Resp[bool]:
+    service.delete_app(db=db, app_id=int(app_id), req_ctx=req_ctx)
     return Resp(data=True)
 
 

@@ -147,8 +147,11 @@ const router = createRouter({
   ],
 });
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const auth = useAuthStore();
+  if (!auth.initialized) {
+    await auth.init();
+  }
   if (to.meta.public) {
     if (auth.isLoggedIn && to.path === "/login") {
       next({ path: "/" });

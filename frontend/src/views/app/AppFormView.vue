@@ -367,41 +367,6 @@
           </div>
         </section>
 
-        <section v-if="formModel.app_type === 'agent_flow'" class="form-section">
-          <div class="section-head">
-            <div>
-              <h3 class="section-title">Agent Flow 编排配置</h3>
-              <p class="section-sub">当前阶段先维护流程元数据，完整可视化编排后续接入。</p>
-            </div>
-          </div>
-          <a-alert
-            type="info"
-            show-icon
-            message="当前系统先实现 Agent Flow 基础信息与流程标识配置，可视化编排器后续接入。"
-            class="flow-alert"
-          />
-          <a-row :gutter="16">
-            <a-col :xs="24" :md="8">
-              <a-form-item label="流程实例">
-                <a-input v-model:value="flowConfig.flow_instance" placeholder="如 flow-prod" />
-              </a-form-item>
-            </a-col>
-            <a-col :xs="24" :md="8">
-              <a-form-item label="流程 ID">
-                <a-input v-model:value="flowConfig.flow_id" placeholder="Flowise 流程 ID" />
-              </a-form-item>
-            </a-col>
-            <a-col :xs="24" :md="8">
-              <a-form-item label="流程名称">
-                <a-input v-model:value="flowConfig.flow_name" placeholder="流程名称" />
-              </a-form-item>
-            </a-col>
-          </a-row>
-          <a-form-item label="同步 Trace">
-            <a-switch v-model:checked="flowConfig.flow_sync_trace" />
-          </a-form-item>
-        </section>
-
         <section class="form-section">
           <div class="section-head">
             <div>
@@ -611,13 +576,6 @@ const agentBindings = reactive({
   skill_ids: [] as string[],
 });
 
-const flowConfig = reactive({
-  flow_instance: "",
-  flow_id: "",
-  flow_name: "",
-  flow_sync_trace: true,
-});
-
 const formRules = computed<Record<string, Rule[]>>(() => ({
   name: [{ required: true, message: "请输入应用名称" }],
   provider_id: formModel.app_type !== "agent_flow" ? [{ required: true, message: "请选择模型供应商" }] : [],
@@ -690,7 +648,8 @@ function buildAppConfig() {
     case "agent":
       return { ...agentConfig };
     case "agent_flow":
-      return { ...flowConfig };
+      // agent_flow 的画布配置由 Flowise 管理,easy-ai 不维护任何编排元数据
+      return {};
     default:
       return {};
   }
@@ -760,14 +719,7 @@ function fillFromApp(app: AppResp) {
     agentBindings.tool_ids = (app.tool_ids ?? []).slice();
     agentBindings.skill_ids = (app.skill_ids ?? []).slice();
   }
-  if (app.app_type === "agent_flow") {
-    Object.assign(flowConfig, {
-      flow_instance: config.flow_instance ?? "",
-      flow_id: config.flow_id ?? "",
-      flow_name: config.flow_name ?? "",
-      flow_sync_trace: config.flow_sync_trace ?? true,
-    });
-  }
+  // agent_flow 不在 easy-ai 维护编排元数据,无需回填
 }
 
 async function loadDependencies() {
@@ -1055,10 +1007,6 @@ onMounted(async () => {
   font-size: 13px;
   font-weight: 600;
   color: #334155;
-}
-
-.flow-alert {
-  margin-bottom: 16px;
 }
 
 .form-actions {

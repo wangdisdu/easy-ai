@@ -3,36 +3,48 @@ import { ref, computed } from "vue";
 import * as authApi from "@/api/auth";
 import type { UserResp } from "@/api/types";
 
-const TOKEN_KEY = "access_token";
-
 export const useAuthStore = defineStore("auth", () => {
-  const token = ref<string | null>(localStorage.getItem(TOKEN_KEY));
   const user = ref<UserResp | null>(null);
+  const initialized = ref(false);
 
-  const isLoggedIn = computed(() => Boolean(token.value));
-
-  function setToken(t: string | null) {
-    token.value = t;
-    if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
-  }
+  const isLoggedIn = computed(() => user.value !== null);
 
   async function login(account: string, passwd: string) {
     const { data } = await authApi.login(account, passwd);
-    setToken(data.data.access_token);
     user.value = data.data.user;
+    initialized.value = true;
   }
 
-  function logout() {
-    setToken(null);
+  async function logout() {
+    try {
+      await authApi.logout();
+    } catch {
+      /* ignore */
+    }
     user.value = null;
   }
 
   async function loadProfile() {
-    if (!token.value) return;
     const { data } = await authApi.fetchMe();
     user.value = data.data;
   }
 
-  return { token, user, isLoggedIn, login, logout, loadProfile };
+  let initPromise: Promise<void> | null = null;
+  function init() {
+    if (initialized.value) return Promise.resolve();
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      try {
+        await loadProfile();
+      } catch {
+        user.value = null;
+      } finally {
+        initialized.value = true;
+        initPromise = null;
+      }
+    })();
+    return initPromise;
+  }
+
+  return { user, initialized, isLoggedIn, login, logout, init };
 });

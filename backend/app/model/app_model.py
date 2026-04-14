@@ -68,6 +68,8 @@ class AppResp(BaseModel):
     enable_log: bool | None = None
     version_id: str | None = None
     current_version: str | None = None
+    # 仅 agent_flow 类型有值：对应 Flowise 端的 chatflow uuid
+    flowise_chatflow_id: str | None = None
     # 仅 agent 应用返回：绑定的工具/技能 ID 列表
     tool_ids: list[str] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list)
@@ -94,6 +96,7 @@ class AppResp(BaseModel):
             enable_log=bool(entity.enable_log) if entity.enable_log is not None else None,
             version_id=entity.version_id,
             current_version=entity.current_version,
+            flowise_chatflow_id=entity.flowise_chatflow_id,
             create_time=entity.create_time,
             update_time=entity.update_time,
         )

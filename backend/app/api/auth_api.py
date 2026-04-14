@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -14,11 +14,33 @@ from app.service.user_service import UserService
 router = APIRouter(prefix="/auth", tags=["auth"])
 user_service = UserService(SnowflakeGenerator(settings.snowflake_worker_id))
 
+# 全站鉴权 cookie:httpOnly + SameSite=Lax + Path=/。
+# 既被 /flowise/* 反向代理读取,也被 build_request_context 作为主鉴权来源
+# (Bearer 头仅作为 SDK/CLI 的兜底)。
+EASYAI_COOKIE = "easyai_token"
+EASYAI_COOKIE_PATH = "/"
+EASYAI_COOKIE_MAX_AGE = 8 * 3600
+
 
 @router.post("/login", response_model=Resp[UserLoginResp])
-def login(req: UserLoginReq, db: Session = Depends(get_db)) -> Resp[UserLoginResp]:
+def login(req: UserLoginReq, response: Response, db: Session = Depends(get_db)) -> Resp[UserLoginResp]:
     data = user_service.login(db=db, req=req)
+    # 全站 httpOnly cookie:浏览器流量统一走 cookie,/flowise/* 反代亦读取它
+    response.set_cookie(
+        EASYAI_COOKIE,
+        data.access_token,
+        httponly=True,
+        samesite="lax",
+        path=EASYAI_COOKIE_PATH,
+        max_age=EASYAI_COOKIE_MAX_AGE,
+    )
     return Resp(data=data)
+
+
+@router.post("/logout")
+def logout(response: Response) -> Resp[None]:
+    response.delete_cookie(EASYAI_COOKIE, path=EASYAI_COOKIE_PATH)
+    return Resp(data=None)
 
 
 @router.get("/me", response_model=Resp[UserResp])
