@@ -1,6 +1,6 @@
 [submodule "Flowise"]
 	path = Flowise
-	url = https://github.com/FlowiseAI/Flowise.git
+	url = git@code.eoitek.net:monitor/jax/flowise.git
 [submodule "langfuse"]
 	path = langfuse
-	url = https://github.com/langfuse/langfuse.git
+	url = git@code.eoitek.net:monitor/jax/langfuse.git

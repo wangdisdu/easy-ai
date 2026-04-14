@@ -1,16 +1,19 @@
-# easy-ai 主 compose
+# easy-ai 全栈 compose(单文件部署)
 #
-# 本文件只定义 easy-ai 自己的服务(backend / frontend / flowise)。
-# Langfuse 通过 deploy.sh 在启动时用 `-f ../langfuse/docker-compose.yml` 链式合并,
-# 不在这里 include(避免依赖 compose >= 2.20)。
+# 包含三部分:
+#   1. easy-ai 自研: easy-ai-backend / easy-ai-frontend / flowise
+#   2. Langfuse 应用: langfuse-web / langfuse-worker
+#   3. 基础设施: postgres / redis / clickhouse / minio
 #
-# 直接使用本文件:
-#   docker compose -p easy-ai \
-#     -f deploy/docker-compose.yml \
-#     -f langfuse/docker-compose.yml \
-#     --env-file deploy/.env up -d --build
+# 宿主机端口统一在 188xx 段;仅 easy-ai-frontend 与 langfuse-web 绑定到
+# 0.0.0.0,其余组件全部绑定 127.0.0.1 仅本机可访问。
+#
+# 用法见 deploy.sh。
 
 services:
+  # ============================================================
+  # easy-ai 自研
+  # ============================================================
   easy-ai-backend:
     build:
       context: ../backend
@@ -21,16 +24,15 @@ services:
       APP_NAME: easy-ai-backend
       APP_ENV: prod
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: sqlite:////srv/easy-ai-backend/data/easy_ai.db
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/easyai
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: HS256
       SNOWFLAKE_WORKER_ID: ${SNOWFLAKE_WORKER_ID:-1}
-      # Langfuse(指向链式合并进来的 langfuse-web 服务名)
       LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
       LANGFUSE_HOST: http://langfuse-web:3000
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
-      # Flowise
+      # 直接复用 langfuse 首次 init 的 project keys,单一事实源
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
       FLOWISE_ENABLED: "true"
       FLOWISE_INTERNAL_URL: http://flowise:3001
       FLOWISE_SHARED_SECRET: ${FLOWISE_SHARED_SECRET}
@@ -38,7 +40,10 @@ services:
     volumes:
       - easy-ai-data:/srv/easy-ai-backend/data
     depends_on:
-      - flowise
+      flowise:
+        condition: service_started
+      postgres:
+        condition: service_healthy
 
   easy-ai-frontend:
     build:
@@ -47,7 +52,7 @@ services:
     container_name: easy-ai-frontend
     restart: unless-stopped
     ports:
-      - "${EASYAI_HTTP_PORT:-5173}:80"
+      - "${EASYAI_HTTP_PORT:-18080}:80"
     depends_on:
       - easy-ai-backend
 
@@ -57,6 +62,9 @@ services:
       dockerfile: Dockerfile
     container_name: easy-ai-flowise
     restart: unless-stopped
+    # 覆盖镜像里的 USER node:容器隔离环境下用 root 简单可靠,
+    # 避免 /home/node/.flowise volume 挂载点权限问题
+    user: root
     environment:
       PORT: 3001
       EASYAI_TRUSTED_HEADER: "true"
@@ -70,6 +78,163 @@ services:
     volumes:
       - flowise-data:/root/.flowise
 
+  # ============================================================
+  # Langfuse 应用
+  # ============================================================
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: easy-ai-langfuse-worker
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18033:3030"
+    environment: &langfuse-worker-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      SALT: ${SALT}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-false}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-true}
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_USE_AZURE_BLOB: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      # 浏览器用的 presigned URL,指向宿主机上的 minio API 端口
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:18090
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ${REDIS_AUTH}
+      REDIS_TLS_ENABLED: "false"
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: easy-ai-langfuse-web
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    ports:
+      - "${LANGFUSE_WEB_PORT:-18030}:3000"
+    environment:
+      <<: *langfuse-worker-env
+      NEXTAUTH_URL: http://localhost:${LANGFUSE_WEB_PORT:-18030}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+
+  # ============================================================
+  # 基础设施(仅 127.0.0.1,内网通信)
+  # ============================================================
+  postgres:
+    image: postgres:${POSTGRES_VERSION:-15}
+    container_name: easy-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # bootstrap 默认库,实际应用用的 langfuse / easyai 由 init 脚本显式创建
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:18032:5432"
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+      # 仅在 pg 数据目录为空时执行一次,建 langfuse 和 easyai 两个应用库
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server
+    container_name: easy-ai-clickhouse
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-default}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+    ports:
+      - "127.0.0.1:18123:8123"
+      - "127.0.0.1:18190:9000"
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  minio:
+    image: minio/minio
+    container_name: easy-ai-minio
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse} && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:18090:9000"
+      - "127.0.0.1:18091:9001"
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  redis:
+    image: redis:7
+    container_name: easy-ai-redis
+    restart: unless-stopped
+    command: >
+      --requirepass ${REDIS_AUTH}
+    ports:
+      - "127.0.0.1:18079:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
 volumes:
   easy-ai-data:
   flowise-data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:

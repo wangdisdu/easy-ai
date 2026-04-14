@@ -7,16 +7,16 @@
 #   ./deploy.sh restart     # 重启
 #   ./deploy.sh logs [svc]  # 查看日志
 #   ./deploy.sh ps          # 查看状态
-#   ./deploy.sh bootstrap-flowise  # 首次引导 Flowise 默认 Org+Workspace
 #
+# 首次启动时 Flowise 会自动创建默认 Organization+Workspace+admin 账号
+# (由 easyaiBootstrapDefaults 完成),无需任何手动引导步骤。
 set -euo pipefail
 
 cd "$(dirname "$0")"
 
 PROJECT="easy-ai"
 ENV_FILE=".env"
-EASYAI_FILE="docker-compose.yml"
-LANGFUSE_FILE="../langfuse/docker-compose.yml"
+COMPOSE_FILE="docker-compose.yml"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
     if [[ -f .env.example ]]; then
@@ -30,12 +30,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
     fi
 fi
 
-if [[ ! -f "${LANGFUSE_FILE}" ]]; then
-    echo "[easy-ai] 缺少 langfuse 子模块,请先执行: git submodule update --init --recursive" >&2
-    exit 1
-fi
-
-COMPOSE=(docker compose -p "${PROJECT}" --env-file "${ENV_FILE}" -f "${EASYAI_FILE}" -f "${LANGFUSE_FILE}")
+COMPOSE=(docker compose -p "${PROJECT}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 
 cmd="${1:-up}"
 shift || true
@@ -45,12 +40,13 @@ case "${cmd}" in
         "${COMPOSE[@]}" up -d --build "$@"
         echo
         echo "[easy-ai] 启动完成。"
-        echo "  - easy-ai 入口: http://localhost:$(grep -E '^EASYAI_HTTP_PORT=' .env | cut -d= -f2)"
-        echo "  - Langfuse:    http://localhost:3000"
+        easyai_port=$(grep -E '^EASYAI_HTTP_PORT=' .env | cut -d= -f2)
+        langfuse_port=$(grep -E '^LANGFUSE_WEB_PORT=' .env | cut -d= -f2)
+        echo "  - easy-ai 入口: http://localhost:${easyai_port:-18080}"
+        echo "  - Langfuse:    http://localhost:${langfuse_port:-18030}"
         echo "  - Flowise:     内网,经 easy-ai 反代访问,不直接暴露宿主端口"
         echo
-        echo "首次启动需引导 Flowise 默认 Org+Workspace:"
-        echo "  ./deploy.sh bootstrap-flowise"
+        echo "Flowise 默认 Organization+Workspace 会在首次启动时自动创建,无需手动引导。"
         ;;
     down)
         "${COMPOSE[@]}" down "$@"
@@ -67,28 +63,9 @@ case "${cmd}" in
     config)
         "${COMPOSE[@]}" config
         ;;
-    bootstrap-flowise)
-        cat <<EOF
-[easy-ai] Flowise 首次引导步骤:
-
-OPEN_SOURCE 模式下 Org+Workspace 在首次"注册账号"时才创建,trustedHeaderAuth
-中间件依赖这两条记录,所以第一次必须以独立模式注册一个账号:
-
-  1. 临时停止 flowise 容器
-       ${COMPOSE[*]} stop flowise
-  2. 用独立模式启动一次(关闭 trusted-header,临时开放注册端口)
-       ${COMPOSE[*]} run --rm -p 3001:3001 \\
-         -e EASYAI_TRUSTED_HEADER=false flowise
-  3. 浏览器打开 http://localhost:3001 → 注册任意账号 → 看到画布列表后 Ctrl+C
-  4. 重新启动正常模式
-       ${COMPOSE[*]} up -d flowise
-
-之后 flowise volume 已包含默认 Org+Workspace,后续都走 trusted-header。
-EOF
-        ;;
     *)
         echo "未知命令: ${cmd}" >&2
-        echo "用法: $0 {up|down|restart|logs|ps|config|bootstrap-flowise}" >&2
+        echo "用法: $0 {up|down|restart|logs|ps|config}" >&2
         exit 1
         ;;
 esac

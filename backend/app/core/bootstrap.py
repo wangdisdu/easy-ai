@@ -15,7 +15,7 @@ from app.service.user_service import UserService
 logger = logging.getLogger(__name__)
 
 DEFAULT_ADMIN_ACCOUNT = "admin"
-DEFAULT_ADMIN_PASSWD = "admin"
+DEFAULT_ADMIN_PASSWD = "admin@123"
 DEFAULT_ADMIN_NAME = "管理员"
 DEFAULT_ADMIN_ROLE_CODE = "admin"
 DEFAULT_ADMIN_ROLE_NAME = "管理员"

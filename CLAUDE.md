@@ -27,7 +27,7 @@ make code-format     # ruff --fix + black
 make code-check      # ruff + black --check (CI)
 ```
 
-Environment: copy `.env.example` to `.env`. Key vars: `DATABASE_URL`, `JWT_SECRET`, `SNOWFLAKE_WORKER_ID`.
+Environment: copy `.env.example` to `.env`. Key vars: `DATABASE_URL` (postgres, e.g. `postgresql+psycopg://easyai:...@127.0.0.1:18032/easyai`), `JWT_SECRET`, `SNOWFLAKE_WORKER_ID`. Local dev needs a postgres reachable at `DATABASE_URL` — easiest is `cd deploy && ./deploy.sh up postgres`.
 
 ### Architecture (backend/app/)
 
@@ -35,7 +35,7 @@ Environment: copy `.env.example` to `.env`. Key vars: `DATABASE_URL`, `JWT_SECRE
 - `service/` — Business logic layer.
 - `model/` — Pydantic request/response models (e.g., `UserCreateReq`, `UserResp`).
 - `core/` — Config, logging, exceptions (`ServiceError`), error codes (`ErrorCode`), JWT security, request context (`RequestContext`), Snowflake ID generator, unified response (`Resp`, `PagedResp`).
-- `db/` — SQLAlchemy ORM schema (`schema.py`) and session management. Tables auto-created on startup.
+- `db/` — SQLAlchemy ORM schema (`schema.py`) and session management. Schema changes go through Alembic (`backend/alembic/versions/`); run `make db-upgrade` after pulling or generating a migration.
 
 ### Conventions
 

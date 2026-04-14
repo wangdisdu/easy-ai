@@ -9,7 +9,9 @@ class Settings(BaseSettings):
     app_name: str = "easy-ai-backend"
     app_env: str = "dev"
     log_level: str = "INFO"
-    database_url: str = Field(default="sqlite:///./easy_ai.db")
+    database_url: str = Field(
+        default="postgresql+psycopg://postgres:postgres@127.0.0.1:18032/easyai"
+    )
     jwt_secret: str = "change-me"
     jwt_algorithm: str = "HS256"
     snowflake_worker_id: int = 1

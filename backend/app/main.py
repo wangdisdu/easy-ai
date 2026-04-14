@@ -6,9 +6,6 @@ from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
 from app.core.exception_handler import register_exception_handlers
 from app.core.logger import setup_logging
-from app.db.schema import Base
-from app.db.session import engine
-from sqlalchemy import inspect, text
 
 setup_logging()
 app = FastAPI(title=settings.app_name)
@@ -18,21 +15,10 @@ app.include_router(api_router)
 app.include_router(flowise_proxy_router)
 
 
-def _ensure_tb_app_columns() -> None:
-    # create_all 不会 ALTER 已有表;手动补 agent_flow 联动需要的列
-    inspector = inspect(engine)
-    if "tb_app" not in inspector.get_table_names():
-        return
-    cols = {c["name"] for c in inspector.get_columns("tb_app")}
-    if "flowise_chatflow_id" not in cols:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE tb_app ADD COLUMN flowise_chatflow_id VARCHAR(64)"))
-
-
 @app.on_event("startup")
 def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    _ensure_tb_app_columns()
+    # 表结构由 alembic upgrade head 负责(容器启动脚本 / 本地 make db-upgrade),
+    # 这里只播种默认 admin。
     ensure_default_admin()
 
 

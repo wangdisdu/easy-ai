@@ -20,14 +20,17 @@ WORKDIR /srv/easy-ai-backend
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-# App source
+# App source + alembic
 COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 
-# Persistent SQLite + uploads
+# 上传/日志等运行时数据(数据库改用 postgres,这个目录只存未来的上传/附件等)
 RUN mkdir -p /srv/easy-ai-backend/data
 VOLUME ["/srv/easy-ai-backend/data"]
 
 ENV PATH="/srv/easy-ai-backend/.venv/bin:${PATH}"
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# 启动时先跑迁移,再起 uvicorn。alembic env.py 从 settings 读 DATABASE_URL。
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
