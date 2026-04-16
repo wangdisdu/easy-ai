@@ -1,6 +1,8 @@
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.app.agent_app import AgentApp
@@ -11,7 +13,8 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext, build_request_context
 from app.core.response import Resp
-from app.db.session import get_db
+from app.core.sse import sse_response
+from app.db.session import SessionLocal, get_db
 from app.model.open_model import (
     AgentRunRequest,
     AppRunReq,
@@ -45,6 +48,65 @@ def test_app(
     req_ctx: RequestContext = Depends(build_request_context),
 ) -> Resp[dict[str, Any]]:
     return Resp(data=_dispatch(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=True))
+
+
+@router.post("/{app_id}/stream")
+async def run_app_stream(
+    app_id: int,
+    req: AppRunReq,
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> StreamingResponse:
+    db = SessionLocal()
+    try:
+        generator = _dispatch_stream(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=False)
+    except Exception:
+        db.close()
+        raise
+    return sse_response(generator)
+
+
+@router.post("/{app_id}/test/stream")
+async def test_app_stream(
+    app_id: int,
+    req: AppTestReq,
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> StreamingResponse:
+    db = SessionLocal()
+    try:
+        generator = _dispatch_stream(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=True)
+    except Exception:
+        db.close()
+        raise
+    return sse_response(generator)
+
+
+def _dispatch_stream(
+    *,
+    db: Session,
+    app_id: int,
+    req: AppRunReq,
+    req_ctx: RequestContext,
+    is_test: bool,
+) -> AsyncGenerator[str, None]:
+    """按应用类型分发到对应的流式执行方法。
+
+    db session 的生命周期由各 stream() 方法内部管理（流前关闭，日志写入用独立 session）。
+    """
+    app = app_runtime.get_app(db, app_id)
+    request_type = "test" if is_test else "api"
+
+    if app.app_type == "llm":
+        llm_req = LlmAppRunReq(app_id=app_id, inputs=req.inputs, messages=req.messages)
+        return llm_app.stream(db=db, req=llm_req, req_ctx=req_ctx, request_type=request_type)
+
+    if app.app_type == "agent":
+        agent_req = AgentRunRequest(app_id=app_id, messages=req.messages, variables=req.variables)
+        return agent_app.stream(db=db, req=agent_req, req_ctx=req_ctx, request_type=request_type)
+
+    db.close()
+    raise ServiceError(
+        ErrorCode.BAD_REQUEST, f"streaming not supported for app type: {app.app_type}"
+    )
 
 
 def _dispatch(

@@ -287,7 +287,34 @@ class TbAppLog(Base):
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    conversation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbConversation(Base):
+    __tablename__ = "tb_conversation"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    app_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbConversationMessage(Base):
+    __tablename__ = "tb_conversation_message"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

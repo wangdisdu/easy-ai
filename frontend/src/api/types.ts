@@ -271,3 +271,26 @@ export interface LlmProviderResp {
   create_time: number;
   update_time: number;
 }
+
+// ── 智能助手 ──
+
+export interface ConversationResp {
+  id: string;
+  app_id: string;
+  app_type: string;
+  app_name: string;
+  title: string;
+  status: string;
+  last_message?: string | null;
+  create_time: number;
+  update_time: number;
+}
+
+export interface ConversationMessageResp {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content?: string | null;
+  metadata?: Record<string, unknown> | null;
+  create_time: number;
+}

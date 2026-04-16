@@ -23,7 +23,7 @@ const router = createRouter({
             title: "智能助手",
             menu: { title: "智能助手", icon: "robot", order: 1 },
           },
-          component: () => import("@/views/MockFeatureView.vue"),
+          component: () => import("@/views/assistant/AssistantView.vue"),
         },
         {
           path: "app",

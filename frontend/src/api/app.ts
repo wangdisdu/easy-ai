@@ -1,4 +1,5 @@
 import request from "./request";
+import { fetchSSE, type SSEOptions } from "./sse";
 import type { ApiPageResp, ApiResp, AppLogResp, AppResp, AppRunResp, AppVersionResp } from "./types";
 
 const TEST_APP_REQUEST_TIMEOUT = 300000;
@@ -87,4 +88,21 @@ export function testApp(id: string, body: AppTestBody) {
   return request.post<ApiResp<AppRunResp>>(`/api/v1/open/app/${id}/test`, body, {
     timeout: TEST_APP_REQUEST_TIMEOUT,
   });
+}
+
+export function testAppStream(
+  id: string,
+  body: AppTestBody,
+  options: Omit<SSEOptions, "signal">,
+): { abort: () => void } {
+  const controller = new AbortController();
+  fetchSSE(
+    `/api/v1/open/app/${id}/test/stream`,
+    body as Record<string, unknown>,
+    { ...options, signal: controller.signal },
+  ).catch((err: unknown) => {
+    if (err instanceof Error && err.name === "AbortError") return;
+    options.onError?.(err instanceof Error ? err : new Error(String(err)));
+  });
+  return { abort: () => controller.abort() };
 }

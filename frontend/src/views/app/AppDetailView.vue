@@ -336,74 +336,179 @@
       </a-form>
     </a-modal>
 
-    <a-drawer v-model:open="testOpen" title="应用测试" width="520" destroy-on-close>
-      <div v-if="app?.app_type === 'llm'" class="test-panel">
-        <a-form v-if="llmInputVars.length" layout="vertical">
-          <a-form-item
-            v-for="item in llmInputVars"
-            :key="item.name || item.label"
-            :label="item.label || item.name || '测试输入'"
-            class="test-form-item"
-          >
-            <a-input-number
-              v-if="item.type === 'number'"
-              v-model:value="llmTestInputs[item.name]"
-              class="full-width"
-              placeholder="请输入测试内容"
-            />
-            <a-textarea
-              v-else-if="item.type === 'textarea'"
-              v-model:value="llmTestInputs[item.name]"
-              :rows="4"
-              placeholder="请输入测试内容"
-            />
-            <a-input
-              v-else
-              v-model:value="llmTestInputs[item.name]"
-              :placeholder="`请输入${item.label || item.name || '测试内容'}`"
-            />
-          </a-form-item>
-        </a-form>
-        <a-empty v-else :image="false" description="未定义输入变量，将直接按当前 Prompt 试跑" />
+    <a-drawer
+      v-model:open="testOpen"
+      title="应用测试"
+      width="560"
+      destroy-on-close
+      :body-style="{ padding: 0, display: 'flex', flexDirection: 'column', height: '100%' }"
+    >
+      <template v-if="['llm', 'agent'].includes(app?.app_type ?? '')">
+        <div class="test-chat-body">
+          <!-- 输入 + 操作合并区 -->
+          <div class="test-composer">
+            <!-- LLM 输入表单 -->
+            <template v-if="app?.app_type === 'llm'">
+              <a-form v-if="llmInputVars.length" layout="vertical" class="test-composer-form">
+                <a-form-item
+                  v-for="item in llmInputVars"
+                  :key="item.name || item.label"
+                  :label="item.label || item.name || '测试输入'"
+                  class="test-form-item"
+                >
+                  <a-input-number
+                    v-if="item.type === 'number'"
+                    v-model:value="llmTestInputs[item.name]"
+                    class="full-width"
+                    placeholder="请输入测试内容"
+                  />
+                  <a-textarea
+                    v-else-if="item.type === 'textarea'"
+                    v-model:value="llmTestInputs[item.name]"
+                    :rows="3"
+                    :auto-size="{ minRows: 2, maxRows: 6 }"
+                    placeholder="请输入测试内容"
+                  />
+                  <a-input
+                    v-else
+                    v-model:value="llmTestInputs[item.name]"
+                    :placeholder="`请输入${item.label || item.name || '测试内容'}`"
+                  />
+                </a-form-item>
+              </a-form>
+              <div v-else class="test-composer-hint">未定义输入变量，将直接按当前 Prompt 试跑</div>
+            </template>
 
-        <div class="test-actions">
-          <a-button type="primary" :loading="testingLlm" @click="onTestLlm">运行测试</a-button>
-        </div>
+            <!-- Agent 输入 -->
+            <template v-if="app?.app_type === 'agent'">
+              <a-textarea
+                v-model:value="agentTestMessage"
+                :auto-size="{ minRows: 2, maxRows: 6 }"
+                placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+                :disabled="isStreaming"
+                class="test-composer-textarea"
+                @pressEnter="(e: KeyboardEvent) => { if (!e.shiftKey) { e.preventDefault(); onTestAgent(); } }"
+              />
+            </template>
 
-        <a-empty v-if="!llmTestResult" :image="false" description="暂无测试结果" />
-        <div v-else class="test-result-stack">
-          <div class="test-result-meta">
-            <span>模型：{{ llmTestResult.model }}</span>
-            <span>耗时：{{ llmTestResult.latency_ms ?? "-" }} ms</span>
+            <!-- 底部操作条 -->
+            <div class="test-composer-bar">
+              <span v-if="streamMeta.model" class="test-meta-tag">{{ streamMeta.model }}</span>
+              <span class="test-composer-spacer" />
+              <a-button v-if="isStreaming" size="small" danger @click="onStopStream">停止</a-button>
+              <a-button
+                type="primary"
+                size="small"
+                :loading="isStreaming"
+                :disabled="isStreaming"
+                @click="app?.app_type === 'llm' ? onTestLlm() : onTestAgent()"
+              >
+                运行
+              </a-button>
+            </div>
           </div>
-          <pre class="prompt-block">{{ stringifyJson(llmTestResult.result) }}</pre>
-        </div>
-      </div>
-      <div v-else-if="app?.app_type === 'agent'" class="test-panel">
-        <a-form layout="vertical">
-          <a-form-item label="测试消息" class="test-form-item">
-            <a-textarea
-              v-model:value="agentTestMessage"
-              :rows="6"
-              placeholder="请输入发送给 Agent 的测试消息"
-            />
-          </a-form-item>
-        </a-form>
 
-        <div class="test-actions">
-          <a-button type="primary" :loading="testingAgent" @click="onTestAgent">运行测试</a-button>
-        </div>
+          <!-- 消息时间轴 -->
+          <div v-if="hasTestOutput" class="test-timeline">
+            <!-- 用户消息 -->
+            <div v-if="userMessageText" class="tl-item">
+              <div class="tl-rail">
+                <span class="tl-dot tl-dot--human" />
+                <span class="tl-line" />
+              </div>
+              <div class="tl-body">
+                <div class="msg-card msg-card--human">
+                  <div class="msg-header">
+                    <span class="msg-type-badge msg-type-badge--human">{{ msgTypeLabel.human }}</span>
+                  </div>
+                  <div class="msg-content">{{ userMessageText }}</div>
+                </div>
+              </div>
+            </div>
 
-        <a-empty v-if="!agentTestResult" :image="false" description="暂无测试结果" />
-        <div v-else class="test-result-stack">
-          <div class="test-result-meta">
-            <span>模型：{{ agentTestResult.model }}</span>
-            <span>耗时：{{ agentTestResult.latency_ms ?? "-" }} ms</span>
+            <!-- 工具调用消息 -->
+            <div
+              v-for="(tc, idx) in streamingToolCalls"
+              :key="'tc-' + idx"
+              class="tl-item"
+            >
+              <div class="tl-rail">
+                <span class="tl-dot tl-dot--tool" />
+                <span class="tl-line" />
+              </div>
+              <div class="tl-body">
+                <div class="msg-card msg-card--tool">
+                  <div class="msg-header">
+                    <span class="msg-type-badge msg-type-badge--tool">{{ msgTypeLabel.tool }}</span>
+                    <span class="msg-tool-status">
+                      <a-spin v-if="tc.status === 'running'" size="small" />
+                      <span v-else class="msg-tool-status-done">done</span>
+                    </span>
+                  </div>
+                  <div class="msg-tool-calls">
+                    <div class="msg-tool-call">
+                      <span class="msg-tool-name">{{ tc.name }}</span>
+                      <pre v-if="tc.arguments && Object.keys(tc.arguments).length" class="msg-tool-args">{{ stringifyJson(tc.arguments) }}</pre>
+                    </div>
+                  </div>
+                  <div v-if="tc.result" class="msg-content msg-content--tool-result">{{ truncateToolResult(tc.result, 500) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- AI 回复消息 -->
+            <div v-if="streamingContent || isStreaming" class="tl-item">
+              <div class="tl-rail">
+                <span class="tl-dot tl-dot--ai" />
+                <span class="tl-line tl-line--last" />
+              </div>
+              <div class="tl-body">
+                <div class="msg-card msg-card--ai">
+                  <div class="msg-header">
+                    <span class="msg-type-badge msg-type-badge--ai">{{ msgTypeLabel.ai }}</span>
+                    <span v-if="streamMeta.tokenUsage?.total_tokens" class="msg-tokens">
+                      {{ streamMeta.tokenUsage.total_tokens }} tokens
+                      (入 {{ streamMeta.tokenUsage.input_tokens ?? "-" }} / 出 {{ streamMeta.tokenUsage.output_tokens ?? "-" }})
+                    </span>
+                  </div>
+                  <div
+                    v-if="streamingContent"
+                    class="msg-content"
+                    v-html="renderMarkdown(streamingContent + (isStreaming ? '▍' : ''))"
+                  ></div>
+                  <div v-else class="msg-content msg-content--empty">
+                    <a-spin size="small" /> 正在思考...
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 统计信息 -->
+            <div v-if="!isStreaming && streamMeta.latency_ms" class="tl-item tl-item--stats">
+              <div class="tl-rail">
+                <span class="tl-dot tl-dot--done" />
+              </div>
+              <div class="tl-body">
+                <div class="test-stats">
+                  <span>耗时 {{ streamMeta.latency_ms }} ms</span>
+                  <span v-if="streamMeta.tokenUsage?.total_tokens">
+                    总计 {{ streamMeta.tokenUsage.total_tokens }} tokens
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
-          <pre class="prompt-block">{{ stringifyJson(agentTestResult.result) }}</pre>
+
+          <!-- 空状态 -->
+          <div v-else class="test-empty">
+            <div class="test-empty-icon">{{ app?.app_type === 'agent' ? '🤖' : '✨' }}</div>
+            <div class="test-empty-text">{{ app?.app_type === 'agent' ? '输入消息开始与 Agent 对话' : '填写输入变量后点击运行' }}</div>
+          </div>
         </div>
+      </template>
+      <div v-else class="test-chat-body">
+        <a-empty :image="false" description="当前应用类型暂未接入测试面板" style="margin: auto" />
       </div>
-      <a-empty v-else :image="false" description="当前应用类型暂未接入测试面板" />
     </a-drawer>
 
     <a-drawer
@@ -465,23 +570,31 @@
 
           <div v-if="currentLog.error_message" class="log-error">{{ currentLog.error_message }}</div>
 
-          <!-- 消息列表 -->
-          <div class="msg-list">
-            <div v-for="(msg, idx) in parsedMessages" :key="idx" :class="['msg-card', `msg-card--${msg.type}`]">
-              <div class="msg-header">
-                <span :class="['msg-type-badge', `msg-type-badge--${msg.type}`]">{{ msgTypeLabel[msg.type] || msg.type }}</span>
-                <span v-if="msg.tokens.total !== null" class="msg-tokens">
-                  {{ msg.tokens.total }} tokens (入 {{ msg.tokens.input ?? "-" }} / 出 {{ msg.tokens.output ?? "-" }})
-                </span>
+          <!-- 消息时间轴 -->
+          <div class="log-timeline">
+            <div v-for="(msg, idx) in parsedMessages" :key="idx" class="tl-item">
+              <div class="tl-rail">
+                <span :class="['tl-dot', `tl-dot--${msg.type}`]" />
+                <span v-if="idx < parsedMessages.length - 1" class="tl-line" />
               </div>
-              <div v-if="msg.toolCalls && msg.toolCalls.length" class="msg-tool-calls">
-                <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="msg-tool-call">
-                  <span class="msg-tool-name">{{ tc.name }}</span>
-                  <pre class="msg-tool-args">{{ stringifyJson(tc.args) }}</pre>
+              <div class="tl-body">
+                <div :class="['msg-card', `msg-card--${msg.type}`]">
+                  <div class="msg-header">
+                    <span :class="['msg-type-badge', `msg-type-badge--${msg.type}`]">{{ msgTypeLabel[msg.type] || msg.type }}</span>
+                    <span v-if="msg.tokens.total !== null" class="msg-tokens">
+                      {{ msg.tokens.total }} tokens (入 {{ msg.tokens.input ?? "-" }} / 出 {{ msg.tokens.output ?? "-" }})
+                    </span>
+                  </div>
+                  <div v-if="msg.toolCalls && msg.toolCalls.length" class="msg-tool-calls">
+                    <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="msg-tool-call">
+                      <span class="msg-tool-name">{{ tc.name }}</span>
+                      <pre class="msg-tool-args">{{ stringifyJson(tc.args) }}</pre>
+                    </div>
+                  </div>
+                  <div v-if="msg.content" class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+                  <div v-else-if="!msg.toolCalls?.length" class="msg-content msg-content--empty">（无文本内容）</div>
                 </div>
               </div>
-              <div v-if="msg.content" class="msg-content" v-html="renderMarkdown(msg.content)"></div>
-              <div v-else-if="!msg.toolCalls?.length" class="msg-content msg-content--empty">（无文本内容）</div>
             </div>
           </div>
         </template>
@@ -498,7 +611,8 @@ import { message } from "ant-design-vue";
 import { marked } from "marked";
 import * as appApi from "@/api/app";
 import * as llmApi from "@/api/llm";
-import type { AppLogResp, AppResp, AppRunResp, AppVersionResp } from "@/api/types";
+import type { AppLogResp, AppResp, AppVersionResp } from "@/api/types";
+import type { SSEEvent } from "@/api/sse";
 import { formatMs } from "@/utils/time";
 
 const route = useRoute();
@@ -512,16 +626,38 @@ const activeTab = ref("config");
 const publishOpen = ref(false);
 const publishing = ref(false);
 const testOpen = ref(false);
-const testingLlm = ref(false);
-const testingAgent = ref(false);
-const llmTestResult = ref<AppRunResp | null>(null);
-const agentTestResult = ref<AppRunResp | null>(null);
 const agentTestMessage = ref("");
 const llmTestInputs = reactive<Record<string, string | number | undefined>>({});
 const logDetailOpen = ref(false);
 const currentLog = ref<AppLogResp | null>(null);
 const logViewMode = ref<"formatted" | "raw">("formatted");
 const publishForm = reactive({ version: "", version_note: "" });
+
+// 流式输出状态
+interface StreamingToolCall {
+  tool_call_id: string;
+  name: string;
+  status: "running" | "done";
+  arguments?: Record<string, unknown>;
+  result?: string;
+}
+interface TokenUsage {
+  total_tokens: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+}
+const isStreaming = ref(false);
+const streamingContent = ref("");
+const streamingToolCalls = ref<StreamingToolCall[]>([]);
+const streamAbort = ref<{ abort: () => void } | null>(null);
+const userMessageText = ref("");
+const streamMeta = reactive<{ model: string; latency_ms: number | null; tokenUsage: TokenUsage | null }>({
+  model: "",
+  latency_ms: null,
+  tokenUsage: null,
+});
+
+const hasTestOutput = computed(() => isStreaming.value || streamingContent.value || streamingToolCalls.value.length || userMessageText.value);
 
 const msgTypeLabel: Record<string, string> = {
   human: "用户",
@@ -751,8 +887,7 @@ function openLogDetail(log: AppLogResp) {
 
 function openTestDrawer() {
   testOpen.value = true;
-  llmTestResult.value = null;
-  agentTestResult.value = null;
+  resetStreamState();
   if (app.value?.app_type === "agent" && !agentTestMessage.value.trim()) {
     agentTestMessage.value = "";
   }
@@ -834,48 +969,111 @@ async function onDelete() {
   await router.push("/app");
 }
 
-async function onTestLlm() {
-  if (!app.value || app.value.app_type !== "llm") {
-    return;
-  }
-  testingLlm.value = true;
-  try {
-    const inputs = Object.fromEntries(
-      Object.entries(llmTestInputs).filter(([, value]) => value !== undefined && value !== "")
-    );
-    const { data } = await appApi.testApp(app.value.id, {
-      inputs,
-    });
-    llmTestResult.value = data.data;
-    message.success("测试完成");
-  } finally {
-    testingLlm.value = false;
+function resetStreamState() {
+  streamingContent.value = "";
+  streamingToolCalls.value = [];
+  userMessageText.value = "";
+  streamMeta.model = "";
+  streamMeta.latency_ms = null;
+  streamMeta.tokenUsage = null;
+  streamAbort.value = null;
+}
+
+function handleStreamEvent(evt: SSEEvent) {
+  switch (evt.event) {
+    case "metadata":
+      streamMeta.model = (evt.data.model as string) || "";
+      break;
+    case "token":
+      streamingContent.value += (evt.data.content as string) || "";
+      break;
+    case "tool_call_start":
+      streamingToolCalls.value.push({
+        tool_call_id: (evt.data.tool_call_id as string) || "",
+        name: (evt.data.name as string) || "",
+        status: "running",
+        arguments: evt.data.arguments as Record<string, unknown> | undefined,
+      });
+      break;
+    case "tool_call_end": {
+      const id = evt.data.tool_call_id as string;
+      const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
+      if (tc) {
+        tc.status = "done";
+        tc.result = (evt.data.result as string) || "";
+      }
+      break;
+    }
+    case "message_complete":
+      streamMeta.tokenUsage = (evt.data.usage as TokenUsage) ?? null;
+      break;
+    case "done":
+      streamMeta.latency_ms = (evt.data.latency_ms as number) ?? null;
+      break;
+    case "error":
+      message.error((evt.data.message as string) || "执行出错");
+      break;
   }
 }
 
-async function onTestAgent() {
-  if (!app.value || app.value.app_type !== "agent") {
-    return;
-  }
+function onStopStream() {
+  streamAbort.value?.abort();
+  streamAbort.value = null;
+  isStreaming.value = false;
+}
+
+function truncateToolResult(text: string, max = 200): string {
+  return text.length > max ? text.slice(0, max) + "..." : text;
+}
+
+function onTestLlm() {
+  if (!app.value || app.value.app_type !== "llm") return;
+  resetStreamState();
+  isStreaming.value = true;
+
+  const inputs = Object.fromEntries(
+    Object.entries(llmTestInputs).filter(([, value]) => value !== undefined && value !== "")
+  );
+  // 构建用户消息文本用于展示
+  const parts = Object.entries(inputs).map(([k, v]) => `${k}: ${v}`);
+  userMessageText.value = parts.length ? parts.join("\n") : "(默认 Prompt)";
+
+  streamAbort.value = appApi.testAppStream(app.value.id, { inputs }, {
+    onEvent: handleStreamEvent,
+    onDone() {
+      isStreaming.value = false;
+    },
+    onError(err) {
+      message.error(err.message || "测试请求失败");
+      isStreaming.value = false;
+    },
+  });
+}
+
+function onTestAgent() {
+  if (!app.value || app.value.app_type !== "agent") return;
   if (!agentTestMessage.value.trim()) {
     message.warning("请输入测试消息");
     return;
   }
-  testingAgent.value = true;
-  try {
-    const { data } = await appApi.testApp(app.value.id, {
-      messages: [
-        {
-          role: "user",
-          content: agentTestMessage.value.trim(),
-        },
-      ],
-    });
-    agentTestResult.value = data.data;
-    message.success("测试完成");
-  } finally {
-    testingAgent.value = false;
-  }
+  resetStreamState();
+  isStreaming.value = true;
+  userMessageText.value = agentTestMessage.value.trim();
+
+  streamAbort.value = appApi.testAppStream(
+    app.value.id,
+    { messages: [{ role: "user", content: agentTestMessage.value.trim() }] },
+    {
+      onEvent: handleStreamEvent,
+      onDone() {
+        isStreaming.value = false;
+      },
+      onError(err) {
+        message.error(err.message || "测试请求失败");
+        isStreaming.value = false;
+      },
+    },
+  );
 }
 
 onMounted(() => {
@@ -1075,33 +1273,196 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.test-panel {
+/* ── 测试面板 ── */
+.test-chat-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  overflow-y: auto;
 }
 
-.test-actions {
+/* 输入 + 操作合并区 */
+.test-composer {
+  flex-shrink: 0;
+  margin: 16px 20px 0;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+}
+
+.test-composer-form {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
 }
 
 .test-form-item {
   margin-bottom: 0;
 }
 
-.test-result-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.test-composer-hint {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #94a3b8;
 }
 
-.test-result-meta {
+.test-composer-textarea {
+  border: none !important;
+  box-shadow: none !important;
+  resize: none;
+  padding: 14px 16px;
+  font-size: 13px;
+}
+
+.test-composer-textarea:focus {
+  box-shadow: none !important;
+}
+
+.test-composer-bar {
   display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(226, 232, 240, 0.6);
+  background: rgba(248, 250, 252, 0.5);
+}
+
+.test-composer-spacer {
+  flex: 1;
+}
+
+.test-meta-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.08);
+  color: #7c3aed;
+  font-size: 11px;
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 消息时间轴 */
+.test-timeline {
+  flex: 1;
+  padding: 20px 20px 20px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.tl-item {
+  display: flex;
+  gap: 0;
+  min-height: 0;
+}
+
+.tl-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 20px;
+  flex-shrink: 0;
+  padding-top: 6px;
+}
+
+.tl-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  border: 2px solid #cbd5e1;
+  background: #fff;
+}
+
+.tl-dot--human  { border-color: #2563eb; background: rgba(37, 99, 235, 0.15); }
+.tl-dot--ai     { border-color: #8b5cf6; background: rgba(139, 92, 246, 0.15); }
+.tl-dot--tool   { border-color: #f59e0b; background: rgba(245, 158, 11, 0.15); }
+.tl-dot--system { border-color: #64748b; background: rgba(100, 116, 139, 0.15); }
+.tl-dot--done   { border-color: #10b981; background: rgba(16, 185, 129, 0.15); }
+
+.tl-line {
+  flex: 1;
+  width: 2px;
+  min-height: 16px;
+  background: linear-gradient(180deg, rgba(203, 213, 225, 0.7) 0%, rgba(203, 213, 225, 0.2) 100%);
+  margin: 4px 0;
+}
+
+.tl-line--last {
+  background: transparent;
+}
+
+.tl-body {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 14px;
+  padding-left: 10px;
+}
+
+.tl-item--stats .tl-body {
+  padding-bottom: 0;
+}
+
+/* 统计 */
+.test-stats {
+  display: flex;
+  align-items: center;
   gap: 16px;
-  flex-wrap: wrap;
   font-size: 12px;
-  color: #475569;
+  color: #94a3b8;
+}
+
+/* 空状态 */
+.test-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px;
+}
+
+.test-empty-icon {
+  font-size: 36px;
+  opacity: 0.4;
+}
+
+.test-empty-text {
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+/* 消息卡片补充 */
+.msg-tool-status {
+  display: flex;
+  align-items: center;
+}
+
+.msg-tool-status-done {
+  font-size: 11px;
+  color: #15803d;
+  font-weight: 600;
+}
+
+.msg-content--tool-result {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.06);
+  font-size: 12px;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
 }
 
 .detail-tabs {
@@ -1392,11 +1753,11 @@ onMounted(() => {
   word-break: break-all;
 }
 
-/* 消息列表 */
-.msg-list {
+/* 历史消息时间轴 */
+.log-timeline {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  padding-left: 4px;
 }
 
 .msg-card {

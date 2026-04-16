@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -19,9 +21,22 @@ from app.core.exceptions import ServiceError
 from app.core.mcp_client import call_tool as mcp_call_tool
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
+from app.core.sse import (
+    SSE_EVENT_DONE,
+    SSE_EVENT_ERROR,
+    SSE_EVENT_MESSAGE_COMPLETE,
+    SSE_EVENT_METADATA,
+    SSE_EVENT_TOKEN,
+    SSE_EVENT_TOOL_CALL_END,
+    SSE_EVENT_TOOL_CALL_START,
+    format_sse_done,
+    format_sse_event,
+)
 from app.db.schema import TbAppSkill, TbAppTool, TbMcpServer, TbSkill, TbSkillTool, TbTool
 from app.model.open_model import AgentRunRequest
 from app.service.app_log_service import AppLogService
+
+logger = logging.getLogger(__name__)
 
 
 class AgentApp:
@@ -133,6 +148,216 @@ class AgentApp:
             )
             raise
 
+    async def stream(
+        self,
+        db: Session,
+        req: AgentRunRequest,
+        req_ctx: RequestContext,
+        *,
+        request_type: str = "api",
+    ) -> AsyncGenerator[str, None]:
+        """流式执行 Agent 应用，通过 SSE 事件输出 token 和工具调用过程。
+
+        db 会在流开始前关闭；日志写入在 finally 块中使用独立 session。
+        """
+        from app.db.session import SessionLocal
+
+        app = self._app_runtime.get_app(db, req.app_id)
+        if app.app_type != "agent":
+            raise ServiceError(ErrorCode.BAD_REQUEST, "app is not agent type")
+
+        runtime_config = self._app_runtime.build_chat_runtime(db, req.app_id)
+        app_config = self._app_runtime.get_app_config(db, req.app_id)
+        model = self._langchain_util.build_chat_model(runtime_config)
+        tools = self._build_tools(db, req.app_id)
+        system_prompt = self._build_system_prompt(db, req.app_id, app_config)
+        agent = self._create_deep_agent(
+            model=model,
+            tools=tools,
+            system_prompt=system_prompt,
+            app_config=app_config,
+        )
+        payload = {"messages": [message.model_dump() for message in req.messages]}
+        observation_metadata = {
+            "app_id": str(app.id),
+            "app_name": app.name,
+            "app_type": app.app_type,
+            "request_type": request_type,
+        }
+
+        # 流前 DB 操作完成，关闭 session
+        app_id = app.id
+        app_type = app.app_type
+        db.close()
+
+        handler = CallbackHandler()
+        started_at = time.perf_counter()
+        full_content = ""
+        token_usage: dict[str, int | None] = {
+            "total_tokens": None,
+            "input_tokens": None,
+            "output_tokens": None,
+        }
+        accumulated_usage: dict[str, int] = {
+            "total_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        usage_found = False
+        success = True
+        error_message: str | None = None
+        trace_id: str | None = None
+
+        yield format_sse_event(
+            SSE_EVENT_METADATA,
+            {
+                "app_id": str(app_id),
+                "app_type": app_type,
+                "model": runtime_config.model,
+            },
+        )
+
+        try:
+            with propagate_attributes(metadata=observation_metadata):
+                async for event in agent.astream_events(
+                    payload, version="v2", config={"callbacks": [handler]}
+                ):
+                    kind = event.get("event")
+
+                    if kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content") and chunk.content:
+                            full_content += chunk.content
+                            yield format_sse_event(
+                                SSE_EVENT_TOKEN,
+                                {
+                                    "content": chunk.content,
+                                },
+                            )
+                        usage = getattr(chunk, "usage_metadata", None) if chunk else None
+                        if isinstance(usage, dict) and usage.get("total_tokens"):
+                            usage_found = True
+                            accumulated_usage["total_tokens"] += usage.get("total_tokens", 0)
+                            accumulated_usage["input_tokens"] += usage.get("input_tokens", 0)
+                            accumulated_usage["output_tokens"] += usage.get("output_tokens", 0)
+
+                    elif kind == "on_tool_start":
+                        yield format_sse_event(
+                            SSE_EVENT_TOOL_CALL_START,
+                            {
+                                "tool_call_id": event.get("run_id", ""),
+                                "name": event.get("name", ""),
+                                "arguments": event.get("data", {}).get("input", {}),
+                            },
+                        )
+
+                    elif kind == "on_tool_end":
+                        output = event.get("data", {}).get("output", "")
+                        if hasattr(output, "content"):
+                            output = output.content
+                        yield format_sse_event(
+                            SSE_EVENT_TOOL_CALL_END,
+                            {
+                                "tool_call_id": event.get("run_id", ""),
+                                "name": event.get("name", ""),
+                                "result": str(output) if output else "",
+                                "status": "success",
+                            },
+                        )
+
+                    elif kind == "on_tool_error":
+                        yield format_sse_event(
+                            SSE_EVENT_TOOL_CALL_END,
+                            {
+                                "tool_call_id": event.get("run_id", ""),
+                                "name": event.get("name", ""),
+                                "result": str(event.get("data", {}).get("error", "")),
+                                "status": "error",
+                            },
+                        )
+
+            if usage_found:
+                token_usage = {
+                    "total_tokens": accumulated_usage["total_tokens"],
+                    "input_tokens": accumulated_usage["input_tokens"],
+                    "output_tokens": accumulated_usage["output_tokens"],
+                }
+
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = handler.last_trace_id
+
+            yield format_sse_event(
+                SSE_EVENT_MESSAGE_COMPLETE,
+                {
+                    "content": full_content,
+                    "usage": token_usage,
+                },
+            )
+            yield format_sse_event(
+                SSE_EVENT_DONE,
+                {
+                    "latency_ms": latency_ms,
+                    **token_usage,
+                },
+            )
+            yield format_sse_done()
+
+        except Exception as exc:
+            success = False
+            error_message = str(exc)
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = handler.last_trace_id
+            yield format_sse_event(
+                SSE_EVENT_ERROR,
+                {
+                    "code": "INTERNAL_ERROR",
+                    "message": error_message,
+                },
+            )
+            yield format_sse_done()
+
+        finally:
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = trace_id or handler.last_trace_id
+            log_db = SessionLocal()
+            try:
+                response_payload = (
+                    {
+                        "app_id": str(app_id),
+                        "app_type": app_type,
+                        "model": runtime_config.model,
+                        "result": {"content": full_content},
+                        "latency_ms": latency_ms,
+                    }
+                    if success
+                    else None
+                )
+                self._log_service.create_log(
+                    log_db,
+                    app_id=app_id,
+                    app_type=app_type,
+                    provider_id=runtime_config.provider_id,
+                    model_id=runtime_config.model_id,
+                    model=runtime_config.model,
+                    request_type=request_type,
+                    request_payload=payload,
+                    response_payload=response_payload,
+                    success=success,
+                    response_status=200 if success else None,
+                    latency_ms=latency_ms,
+                    error_message=error_message,
+                    langfuse_trace_id=trace_id,
+                    total_tokens=token_usage["total_tokens"],
+                    input_tokens=token_usage["input_tokens"],
+                    output_tokens=token_usage["output_tokens"],
+                    now=req_ctx.request_time_ms,
+                    user_id=req_ctx.user_id,
+                )
+            except Exception:
+                logger.exception("failed to write stream log for app %s", app_id)
+            finally:
+                log_db.close()
+
     def _create_deep_agent(
         self,
         *,
@@ -178,9 +403,7 @@ class AgentApp:
                 seen.add(binding.tool_id)
                 tool_ids.append(binding.tool_id)
 
-        skill_bindings = db.scalars(
-            select(TbAppSkill).where(TbAppSkill.app_id == app_id)
-        ).all()
+        skill_bindings = db.scalars(select(TbAppSkill).where(TbAppSkill.app_id == app_id)).all()
         if skill_bindings:
             skill_ids = [b.skill_id for b in skill_bindings]
             skill_tool_rows = db.scalars(
