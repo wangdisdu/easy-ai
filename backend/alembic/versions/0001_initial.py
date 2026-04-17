@@ -19,7 +19,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 # 约定:
 # - id / create_user / update_user / create_time / update_time 列在所有表中重复,
-#   用下面的 helper 统一声明,避免 20 行 × 14 表的噪音。
 # - 字符串列统一 VARCHAR(255) 或 TEXT,匹配 CLAUDE.md 的约束。
 
 
@@ -246,12 +245,37 @@ def upgrade() -> None:
         sa.Column("total_tokens", sa.Integer, nullable=True),
         sa.Column("input_tokens", sa.Integer, nullable=True),
         sa.Column("output_tokens", sa.Integer, nullable=True),
+        sa.Column("conversation_id", sa.BigInteger, nullable=True),
         *_audit_cols(),
+    )
+
+    op.create_table(
+        "tb_conversation",
+        _pk(),
+        sa.Column("user_id", sa.BigInteger, nullable=False),
+        sa.Column("app_id", sa.BigInteger, nullable=False),
+        sa.Column("title", sa.String(255), nullable=True),
+        sa.Column("status", sa.String(32), nullable=False),
+        *_audit_cols(),
+    )
+
+    # tb_conversation_message 只留 create_time / create_user,消息不可变
+    op.create_table(
+        "tb_conversation_message",
+        _pk(),
+        sa.Column("conversation_id", sa.BigInteger, nullable=False),
+        sa.Column("role", sa.String(32), nullable=False),
+        sa.Column("content", sa.Text, nullable=True),
+        sa.Column("metadata", sa.Text, nullable=True),
+        sa.Column("create_time", sa.BigInteger, nullable=False),
+        sa.Column("create_user", sa.BigInteger, nullable=True),
     )
 
 
 def downgrade() -> None:
     for t in (
+        "tb_conversation_message",
+        "tb_conversation",
         "tb_app_log",
         "tb_app_version",
         "tb_app_skill",
