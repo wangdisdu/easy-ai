@@ -6,13 +6,15 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Use Alibaba Cloud Debian mirror (bookworm-slim uses DEB822 sources)
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
         build-essential curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && cp /root/.local/bin/uv /usr/local/bin/uv
+# Install uv from PyPI mirror (avoids astral.sh → GitHub releases)
+RUN pip install --no-cache-dir --index-url https://pypi.tuna.tsinghua.edu.cn/simple uv
 
 WORKDIR /srv/easy-ai-backend
 
