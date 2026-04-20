@@ -20,7 +20,9 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_AGENTFLOW_EMPTY_FLOW_DATA = json.dumps({"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}})
+_AGENTFLOW_EMPTY_FLOW_DATA = json.dumps(
+    {"nodes": [], "edges": [], "viewport": {"x": 0, "y": 0, "zoom": 1}}
+)
 
 
 class FlowiseClientError(RuntimeError):
@@ -64,7 +66,9 @@ def create_agentflow(name: str, user_id: int | str) -> str:
     except httpx.HTTPError as e:
         raise FlowiseClientError(f"flowise unreachable: {e}") from e
     if resp.status_code >= 400:
-        raise FlowiseClientError(f"flowise create chatflow failed: {resp.status_code} {resp.text[:300]}")
+        raise FlowiseClientError(
+            f"flowise create chatflow failed: {resp.status_code} {resp.text[:300]}"
+        )
     data = resp.json()
     chatflow_id = data.get("id")
     if not chatflow_id:
@@ -80,7 +84,10 @@ def rename_chatflow(chatflow_id: str, name: str, user_id: int | str) -> None:
             resp = client.put(url, headers=_headers(user_id), json={"name": name})
         if resp.status_code >= 400:
             logger.warning(
-                "flowise rename chatflow %s failed: %s %s", chatflow_id, resp.status_code, resp.text[:200]
+                "flowise rename chatflow %s failed: %s %s",
+                chatflow_id,
+                resp.status_code,
+                resp.text[:200],
             )
     except httpx.HTTPError as e:
         logger.warning("flowise rename chatflow %s unreachable: %s", chatflow_id, e)
@@ -94,7 +101,10 @@ def delete_chatflow(chatflow_id: str, user_id: int | str) -> None:
             resp = client.delete(url, headers=_headers(user_id))
         if resp.status_code >= 400 and resp.status_code != 404:
             logger.warning(
-                "flowise delete chatflow %s failed: %s %s", chatflow_id, resp.status_code, resp.text[:200]
+                "flowise delete chatflow %s failed: %s %s",
+                chatflow_id,
+                resp.status_code,
+                resp.text[:200],
             )
     except httpx.HTTPError as e:
         logger.warning("flowise delete chatflow %s unreachable: %s", chatflow_id, e)

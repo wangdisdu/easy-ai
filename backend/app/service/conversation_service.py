@@ -87,18 +87,46 @@ class ConversationService:
             .offset((page_no - 1) * page_size)
             .limit(page_size)
         ).all()
+        if not rows:
+            return [], total or 0
+
+        app_ids = list({conv.app_id for conv in rows})
+        app_map = {
+            app.id: app for app in db.scalars(select(TbApp).where(TbApp.id.in_(app_ids))).all()
+        }
+
+        conversation_ids = [conv.id for conv in rows]
+        latest_ranked = (
+            select(
+                TbConversationMessage.conversation_id.label("conversation_id"),
+                TbConversationMessage.content.label("content"),
+                func.row_number()
+                .over(
+                    partition_by=TbConversationMessage.conversation_id,
+                    order_by=(
+                        desc(TbConversationMessage.create_time),
+                        desc(TbConversationMessage.id),
+                    ),
+                )
+                .label("rn"),
+            )
+            .where(TbConversationMessage.conversation_id.in_(conversation_ids))
+            .subquery()
+        )
+        latest_message_map = {
+            int(row.conversation_id): row.content
+            for row in db.execute(
+                select(latest_ranked.c.conversation_id, latest_ranked.c.content).where(
+                    latest_ranked.c.rn == 1
+                )
+            ).all()
+        }
 
         result: list[ConversationResp] = []
         for conv in rows:
-            app = db.get(TbApp, conv.app_id)
+            app = app_map.get(conv.app_id)
             resp = self._to_conversation_resp(conv, app)
-            # 取最新一条消息作为预览
-            last_msg = db.scalar(
-                select(TbConversationMessage.content)
-                .where(TbConversationMessage.conversation_id == conv.id)
-                .order_by(desc(TbConversationMessage.create_time))
-                .limit(1)
-            )
+            last_msg = latest_message_map.get(conv.id)
             resp.last_message = _truncate(last_msg, 100) if last_msg else None
             result.append(resp)
         return result, total or 0

@@ -5,6 +5,8 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.core.error_code import ErrorCode
+from app.core.exceptions import ServiceError
 
 
 class RequestContext(BaseModel):
@@ -41,3 +43,10 @@ def build_request_context(request: Request) -> RequestContext:
         client_ip=request.client.host if request.client else None,
         request_time_ms=int(time.time() * 1000),
     )
+
+
+def require_authenticated_user(request: Request) -> RequestContext:
+    req_ctx = build_request_context(request)
+    if req_ctx.user_id is None:
+        raise ServiceError(ErrorCode.UNAUTHORIZED, "unauthorized")
+    return req_ctx

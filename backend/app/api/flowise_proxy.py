@@ -64,11 +64,15 @@ def _resolve_token(request: Request) -> str | None:
 
 def _verify_jwt(token: str | None) -> str:
     if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing easy-ai token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="missing easy-ai token"
+        )
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except JWTError as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid token: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"invalid token: {e}"
+        ) from e
     sub = payload.get("sub")
     if sub is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="token missing sub")
@@ -108,12 +112,17 @@ def _build_upstream_headers(request: Request, user_id: str) -> dict[str, str]:
 )
 async def flowise_proxy(path: str, request: Request) -> Response:
     if not settings.flowise_enabled:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="flowise integration disabled")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="flowise integration disabled",
+        )
 
     if path in _ANON_PATHS:
         # 匿名静态资源:不校验 token,也不注入 X-EasyAI-* 头
         upstream_headers = {
-            k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP and k.lower() != "authorization"
+            k: v
+            for k, v in request.headers.items()
+            if k.lower() not in _HOP_BY_HOP and k.lower() != "authorization"
         }
     else:
         user_id = _verify_jwt(_resolve_token(request))
@@ -138,7 +147,10 @@ async def flowise_proxy(path: str, request: Request) -> Response:
         upstream_resp = await client.send(upstream_req, stream=True)
     except httpx.HTTPError as e:
         await client.aclose()
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"flowise upstream error: {e}") from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"flowise upstream error: {e}",
+        ) from e
 
     resp_headers = {k: v for k, v in upstream_resp.headers.items() if k.lower() not in _RESP_STRIP}
 

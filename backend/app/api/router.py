@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.app_api import router as app_router
 from app.api.auth_api import router as auth_router
@@ -12,17 +12,19 @@ from app.api.tool_api import mcp_router
 from app.api.tool_api import router as tool_router
 from app.api.user_api import router as user_router
 from app.api.user_group_api import router as user_group_router
+from app.core.request_context import require_authenticated_user
 
 api_router = APIRouter(prefix="/api/v1")
-api_router.include_router(user_router)
 api_router.include_router(auth_router)
-api_router.include_router(user_group_router)
-api_router.include_router(role_router)
-api_router.include_router(app_router)
-api_router.include_router(open_router)
-api_router.include_router(skill_router)
-api_router.include_router(tool_router)
-api_router.include_router(mcp_router)
-api_router.include_router(llm_router)
-api_router.include_router(observability_router)
-api_router.include_router(conversation_router)
+_login_required = [Depends(require_authenticated_user)]
+api_router.include_router(user_router, dependencies=_login_required)
+api_router.include_router(user_group_router, dependencies=_login_required)
+api_router.include_router(role_router, dependencies=_login_required)
+api_router.include_router(app_router, dependencies=_login_required)
+api_router.include_router(open_router, dependencies=_login_required)
+api_router.include_router(skill_router, dependencies=_login_required)
+api_router.include_router(tool_router, dependencies=_login_required)
+api_router.include_router(mcp_router, dependencies=_login_required)
+api_router.include_router(llm_router, dependencies=_login_required)
+api_router.include_router(observability_router, dependencies=_login_required)
+api_router.include_router(conversation_router, dependencies=_login_required)

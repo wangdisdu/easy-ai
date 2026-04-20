@@ -9,14 +9,60 @@ from sqlalchemy.orm import Session
 
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
+from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
 from app.db.schema import TbApp, TbAppLog
 from app.model.open_model import AppLogResp
+
+ZERO_USAGE: dict[str, int | None] = {
+    "total_tokens": None,
+    "input_tokens": None,
+    "output_tokens": None,
+}
 
 
 class AppLogService:
     def __init__(self, id_generator: SnowflakeGenerator) -> None:
         self._id_generator = id_generator
+
+    def log_execution(
+        self,
+        db: Session,
+        *,
+        app: TbApp,
+        runtime_config: Any,
+        req_ctx: RequestContext,
+        request_type: str,
+        request_payload: Any,
+        response_payload: Any,
+        success: bool,
+        latency_ms: int,
+        trace_id: str | None,
+        error_message: str | None,
+        token_usage: dict[str, int | None],
+    ) -> None:
+        """将 app/runtime_config/req_ctx 等聚合对象展开为 create_log 所需的扁平 kwargs。"""
+        self.create_log(
+            db,
+            app_id=app.id,
+            app_type=app.app_type,
+            provider_id=runtime_config.provider_id,
+            model_id=runtime_config.model_id,
+            model=runtime_config.model,
+            request_type=request_type,
+            request_payload=request_payload,
+            response_payload=response_payload,
+            success=success,
+            response_status=200 if success else None,
+            latency_ms=latency_ms,
+            error_message=error_message,
+            langfuse_trace_id=trace_id,
+            total_tokens=token_usage["total_tokens"],
+            input_tokens=token_usage["input_tokens"],
+            output_tokens=token_usage["output_tokens"],
+            now=req_ctx.request_time_ms,
+            user_id=req_ctx.user_id,
+        )
 
     def create_log(
         self,

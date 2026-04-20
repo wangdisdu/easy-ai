@@ -37,9 +37,7 @@ class ObservabilityService:
     # 核心指标
     # ══════════════════════════════════
 
-    def get_overview_stats(
-        self, db: Session, *, from_ms: int, to_ms: int
-    ) -> OverviewStats:
+    def get_overview_stats(self, db: Session, *, from_ms: int, to_ms: int) -> OverviewStats:
         window = to_ms - from_ms
         prev_from = from_ms - window
         prev_to = from_ms
@@ -52,9 +50,7 @@ class ObservabilityService:
         success = current["success"]
         fail = total - success
         success_rate = (success / total * 100) if total else 0.0
-        prev_success_rate = (
-            (previous["success"] / prev_total * 100) if prev_total else 0.0
-        )
+        prev_success_rate = (previous["success"] / prev_total * 100) if prev_total else 0.0
 
         p95 = self._p95_latency(db, from_ms, to_ms)
         prev_p95 = self._p95_latency(db, prev_from, prev_to)
@@ -89,9 +85,7 @@ class ObservabilityService:
             ),
         )
 
-    def _aggregate_basic(
-        self, db: Session, from_ms: int, to_ms: int
-    ) -> dict[str, int]:
+    def _aggregate_basic(self, db: Session, from_ms: int, to_ms: int) -> dict[str, int]:
         row = db.execute(
             select(
                 func.count(TbAppLog.id),
@@ -123,9 +117,7 @@ class ObservabilityService:
     # 调用量趋势
     # ══════════════════════════════════
 
-    def get_trend(
-        self, db: Session, *, from_ms: int, to_ms: int, top: int = 5
-    ) -> TrendResp:
+    def get_trend(self, db: Session, *, from_ms: int, to_ms: int, top: int = 5) -> TrendResp:
         bucket_ms = _BUCKET_MS
         bucket_count = max(1, (to_ms - from_ms + bucket_ms - 1) // bucket_ms)
 
@@ -192,9 +184,7 @@ class ObservabilityService:
     # Token 按模型
     # ══════════════════════════════════
 
-    def get_tokens_by_model(
-        self, db: Session, *, from_ms: int, to_ms: int
-    ) -> list[ModelTokenRow]:
+    def get_tokens_by_model(self, db: Session, *, from_ms: int, to_ms: int) -> list[ModelTokenRow]:
         rows = db.execute(
             select(
                 TbAppLog.model,
@@ -257,8 +247,7 @@ class ObservabilityService:
 
         # 每个应用的 P95（应用层近似）
         p95_map: dict[int, int | None] = {
-            app_id: self._p95_latency_for_app(db, app_id, from_ms, to_ms)
-            for app_id in app_ids
+            app_id: self._p95_latency_for_app(db, app_id, from_ms, to_ms) for app_id in app_ids
         }
 
         # 每个应用的趋势（最近 N 个时间点）
@@ -397,12 +386,8 @@ class ObservabilityService:
     # 最近请求
     # ══════════════════════════════════
 
-    def get_recent_requests(
-        self, db: Session, *, limit: int = 20
-    ) -> list[RecentRequestRow]:
-        rows = db.scalars(
-            select(TbAppLog).order_by(desc(TbAppLog.create_time)).limit(limit)
-        ).all()
+    def get_recent_requests(self, db: Session, *, limit: int = 20) -> list[RecentRequestRow]:
+        rows = db.scalars(select(TbAppLog).order_by(desc(TbAppLog.create_time)).limit(limit)).all()
         app_ids = [int(r.app_id) for r in rows if r.app_id is not None]
         app_map = _load_app_map(db, app_ids)
 

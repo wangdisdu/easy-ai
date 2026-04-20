@@ -15,12 +15,12 @@ dependencies = [
   "python-jose[cryptography]==3.5.0",
   "bcrypt==5.0.0",
   "litellm==1.83.0",
-  "langchain==1.2.0",
-  "langchain-core==1.2.2",
+  "langchain==1.2.15",
+  "langchain-core==1.2.27",
   "langchain-openai==1.1.6",
-  "langgraph==1.0.5",
-  "langgraph-prebuilt==1.0.8",
-  "deepagents==0.3.1",
+  "langgraph==1.1.5",
+  "langgraph-prebuilt==1.0.9",
+  "deepagents==0.5.3",
   "mcp==1.27.0",
   "httpx==0.28.1",
   "httpx-sse==0.4.3",
@@ -32,6 +32,18 @@ dev = [
   "black==26.3.1",
   "ruff==0.15.8",
 ]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["alembic*"]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
 
 [tool.ruff]
 line-length = 100

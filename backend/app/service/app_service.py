@@ -10,9 +10,6 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
-from app.integration import flowise_client
-
-logger = logging.getLogger(__name__)
 from app.db.schema import (
     TbApp,
     TbAppSkill,
@@ -23,6 +20,7 @@ from app.db.schema import (
     TbSkill,
     TbTool,
 )
+from app.integration import flowise_client
 from app.model.app_model import (
     AppCreateReq,
     AppPageReq,
@@ -34,6 +32,8 @@ from app.model.app_model import (
     parse_app_config,
     parse_model_setting,
 )
+
+logger = logging.getLogger(__name__)
 
 VALID_APP_TYPES = {"rag", "llm", "nl2sql", "agent", "agent_flow"}
 VALID_STATUSES = {"draft", "published", "offline"}
@@ -133,7 +133,7 @@ class AppService:
         rows = db.scalars(
             stmt.order_by(TbApp.create_time.desc()).offset(offset).limit(req.page_size)
         ).all()
-        return [self._to_app_resp(db, row) for row in rows], total
+        return self._to_app_resp_list(db, rows), total
 
     def get_app_by_id(self, db: Session, app_id: int) -> AppResp:
         entity = db.get(TbApp, app_id)
@@ -359,6 +359,20 @@ class AppService:
             app.skill_ids = self._load_skill_ids(db, entity.id)
         return app
 
+    def _to_app_resp_list(self, db: Session, rows: list[TbApp]) -> list[AppResp]:
+        agent_app_ids = [row.id for row in rows if normalize_app_type(row.app_type) == "agent"]
+        tool_ids_map = self._load_tool_ids_map(db, agent_app_ids)
+        skill_ids_map = self._load_skill_ids_map(db, agent_app_ids)
+
+        result: list[AppResp] = []
+        for row in rows:
+            app = AppResp.from_entity(row)
+            if normalize_app_type(row.app_type) == "agent":
+                app.tool_ids = tool_ids_map.get(row.id, [])
+                app.skill_ids = skill_ids_map.get(row.id, [])
+            result.append(app)
+        return result
+
     def _load_tool_ids(self, db: Session, app_id: int) -> list[str]:
         rows = db.scalars(select(TbAppTool).where(TbAppTool.app_id == app_id)).all()
         return [str(row.tool_id) for row in rows]
@@ -366,6 +380,24 @@ class AppService:
     def _load_skill_ids(self, db: Session, app_id: int) -> list[str]:
         rows = db.scalars(select(TbAppSkill).where(TbAppSkill.app_id == app_id)).all()
         return [str(row.skill_id) for row in rows]
+
+    def _load_tool_ids_map(self, db: Session, app_ids: list[int]) -> dict[int, list[str]]:
+        if not app_ids:
+            return {}
+        result: dict[int, list[str]] = {app_id: [] for app_id in app_ids}
+        rows = db.scalars(select(TbAppTool).where(TbAppTool.app_id.in_(app_ids))).all()
+        for row in rows:
+            result.setdefault(row.app_id, []).append(str(row.tool_id))
+        return result
+
+    def _load_skill_ids_map(self, db: Session, app_ids: list[int]) -> dict[int, list[str]]:
+        if not app_ids:
+            return {}
+        result: dict[int, list[str]] = {app_id: [] for app_id in app_ids}
+        rows = db.scalars(select(TbAppSkill).where(TbAppSkill.app_id.in_(app_ids))).all()
+        for row in rows:
+            result.setdefault(row.app_id, []).append(str(row.skill_id))
+        return result
 
     def _sync_app_bindings(
         self,

@@ -81,6 +81,10 @@ class ModelGatewayService:
                 response_status=response_status,
                 latency_ms=latency_ms,
                 error_message=None,
+                langfuse_trace_id=None,
+                total_tokens=None,
+                input_tokens=None,
+                output_tokens=None,
                 now=req_ctx.request_time_ms,
                 user_id=req_ctx.user_id,
             )
@@ -107,6 +111,10 @@ class ModelGatewayService:
                 response_status=response_status,
                 latency_ms=latency_ms,
                 error_message=error_message,
+                langfuse_trace_id=None,
+                total_tokens=None,
+                input_tokens=None,
+                output_tokens=None,
                 now=req_ctx.request_time_ms,
                 user_id=req_ctx.user_id,
             )
@@ -273,6 +281,10 @@ class ModelGatewayService:
                 response_status=response_status,
                 latency_ms=latency_ms,
                 error_message=None,
+                langfuse_trace_id=None,
+                total_tokens=None,
+                input_tokens=None,
+                output_tokens=None,
                 now=req_ctx.request_time_ms,
                 user_id=req_ctx.user_id,
             )
@@ -298,6 +310,10 @@ class ModelGatewayService:
                 response_status=response_status,
                 latency_ms=latency_ms,
                 error_message=str(exc),
+                langfuse_trace_id=None,
+                total_tokens=None,
+                input_tokens=None,
+                output_tokens=None,
                 now=req_ctx.request_time_ms,
                 user_id=req_ctx.user_id,
             )

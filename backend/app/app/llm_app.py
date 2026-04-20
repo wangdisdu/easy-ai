@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 
 from langfuse import propagate_attributes
@@ -25,10 +26,23 @@ from app.core.sse import (
     format_sse_done,
     format_sse_event,
 )
+from app.db.schema import TbApp
 from app.model.open_model import LlmAppRunReq, ModelGatewayChatMessage
-from app.service.app_log_service import AppLogService
+from app.service.app_log_service import ZERO_USAGE, AppLogService
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _Prepared:
+    """run / stream 共用的一次准备结果。"""
+
+    app: TbApp
+    runtime_config: Any
+    app_config: dict[str, Any]
+    agent: Any
+    payload: dict[str, Any]
+    observation_metadata: dict[str, Any]
 
 
 class LlmApp:
@@ -54,88 +68,52 @@ class LlmApp:
         *,
         request_type: str = "api",
     ) -> dict[str, Any]:
-        app = self._app_runtime.get_app(db, req.app_id)
-        if app.app_type != "llm":
-            raise ServiceError(ErrorCode.BAD_REQUEST, "app is not llm type")
-
-        app_config = self._app_runtime.get_app_config(db, req.app_id)
-        runtime_config = self._app_runtime.build_chat_runtime(db, req.app_id)
-        model = self._langchain_util.build_chat_model(runtime_config)
-        agent = self._langchain_util.create_agent(
-            model=model,
-            tools=[],
-            system_prompt=self._build_system_prompt(app_config),
-        )
-
-        final_messages = req.messages or self._build_messages_from_inputs(app_config, req.inputs)
-        payload = {"messages": [message.model_dump() for message in final_messages]}
-        observation_metadata = {
-            "app_id": str(app.id),
-            "app_name": app.name,
-            "app_type": app.app_type,
-            "request_type": request_type,
-        }
+        prep = self._prepare(db, req, request_type)
         handler = CallbackHandler()
         started_at = time.perf_counter()
         try:
-            with propagate_attributes(metadata=observation_metadata):
-                result = agent.invoke(payload, config={"callbacks": [handler]})
+            with propagate_attributes(metadata=prep.observation_metadata):
+                result = prep.agent.invoke(prep.payload, config={"callbacks": [handler]})
             latency_ms = int((time.perf_counter() - started_at) * 1000)
-            trace_id = handler.last_trace_id
             serialized_result = self._langchain_util.serialize_result(result)
             token_usage = self._langchain_util.extract_token_usage(serialized_result)
             response = {
-                "app_id": str(app.id),
-                "app_type": app.app_type,
-                "model": runtime_config.model,
+                "app_id": str(prep.app.id),
+                "app_type": prep.app.app_type,
+                "model": prep.runtime_config.model,
                 "result": serialized_result,
                 "latency_ms": latency_ms,
             }
-            self._log_service.create_log(
+            self._log_service.log_execution(
                 db,
-                app_id=app.id,
-                app_type=app.app_type,
-                provider_id=runtime_config.provider_id,
-                model_id=runtime_config.model_id,
-                model=runtime_config.model,
+                app=prep.app,
+                runtime_config=prep.runtime_config,
+                req_ctx=req_ctx,
                 request_type=request_type,
-                request_payload=payload,
+                request_payload=prep.payload,
                 response_payload=response,
                 success=True,
-                response_status=200,
                 latency_ms=latency_ms,
+                trace_id=handler.last_trace_id,
                 error_message=None,
-                langfuse_trace_id=trace_id,
-                total_tokens=token_usage["total_tokens"],
-                input_tokens=token_usage["input_tokens"],
-                output_tokens=token_usage["output_tokens"],
-                now=req_ctx.request_time_ms,
-                user_id=req_ctx.user_id,
+                token_usage=token_usage,
             )
             return response
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
-            trace_id = handler.last_trace_id
-            self._log_service.create_log(
+            self._log_service.log_execution(
                 db,
-                app_id=app.id,
-                app_type=app.app_type,
-                provider_id=runtime_config.provider_id,
-                model_id=runtime_config.model_id,
-                model=runtime_config.model,
+                app=prep.app,
+                runtime_config=prep.runtime_config,
+                req_ctx=req_ctx,
                 request_type=request_type,
-                request_payload=payload,
+                request_payload=prep.payload,
                 response_payload=None,
                 success=False,
-                response_status=None,
                 latency_ms=latency_ms,
+                trace_id=handler.last_trace_id,
                 error_message=str(exc),
-                langfuse_trace_id=trace_id,
-                total_tokens=None,
-                input_tokens=None,
-                output_tokens=None,
-                now=req_ctx.request_time_ms,
-                user_id=req_ctx.user_id,
+                token_usage=dict(ZERO_USAGE),
             )
             raise
 
@@ -151,8 +129,86 @@ class LlmApp:
 
         db 会在流开始前关闭；日志写入在 finally 块中使用独立 session。
         """
-        from app.db.session import SessionLocal
+        prep = self._prepare(db, req, request_type)
+        # 流前 DB 操作完成，关闭 session（日志写入走独立 session）
+        db.close()
 
+        handler = CallbackHandler()
+        started_at = time.perf_counter()
+        full_content = ""
+        token_usage: dict[str, int | None] = dict(ZERO_USAGE)
+        success = True
+        error_message: str | None = None
+        trace_id: str | None = None
+
+        yield format_sse_event(
+            SSE_EVENT_METADATA,
+            {
+                "app_id": str(prep.app.id),
+                "app_type": prep.app.app_type,
+                "model": prep.runtime_config.model,
+            },
+        )
+
+        try:
+            with propagate_attributes(metadata=prep.observation_metadata):
+                async for event in prep.agent.astream_events(
+                    prep.payload, version="v2", config={"callbacks": [handler]}
+                ):
+                    if event.get("event") != "on_chat_model_stream":
+                        continue
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        full_content += chunk.content
+                        yield format_sse_event(SSE_EVENT_TOKEN, {"content": chunk.content})
+                    # 提取 usage（通常在最后一个 chunk 上，单次模型调用以最新值为准）
+                    usage = getattr(chunk, "usage_metadata", None)
+                    if isinstance(usage, dict) and usage.get("total_tokens"):
+                        token_usage = {
+                            "total_tokens": usage.get("total_tokens"),
+                            "input_tokens": usage.get("input_tokens"),
+                            "output_tokens": usage.get("output_tokens"),
+                        }
+
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = handler.last_trace_id
+
+            yield format_sse_event(
+                SSE_EVENT_MESSAGE_COMPLETE,
+                {"content": full_content, "usage": token_usage},
+            )
+            yield format_sse_event(
+                SSE_EVENT_DONE,
+                {"latency_ms": latency_ms, **token_usage},
+            )
+            yield format_sse_done()
+
+        except Exception as exc:
+            success = False
+            error_message = str(exc)
+            trace_id = handler.last_trace_id
+            yield format_sse_event(
+                SSE_EVENT_ERROR,
+                {"code": "INTERNAL_ERROR", "message": error_message},
+            )
+            yield format_sse_done()
+
+        finally:
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            trace_id = trace_id or handler.last_trace_id
+            self._log_stream_finally(
+                prep,
+                req_ctx,
+                request_type,
+                success=success,
+                full_content=full_content,
+                latency_ms=latency_ms,
+                trace_id=trace_id,
+                error_message=error_message,
+                token_usage=token_usage,
+            )
+
+    def _prepare(self, db: Session, req: LlmAppRunReq, request_type: str) -> _Prepared:
         app = self._app_runtime.get_app(db, req.app_id)
         if app.app_type != "llm":
             raise ServiceError(ErrorCode.BAD_REQUEST, "app is not llm type")
@@ -174,132 +230,62 @@ class LlmApp:
             "app_type": app.app_type,
             "request_type": request_type,
         }
-
-        # 流前 DB 操作完成，关闭 session
-        app_id = app.id
-        app_type = app.app_type
-        db.close()
-
-        handler = CallbackHandler()
-        started_at = time.perf_counter()
-        full_content = ""
-        token_usage: dict[str, int | None] = {
-            "total_tokens": None,
-            "input_tokens": None,
-            "output_tokens": None,
-        }
-        success = True
-        error_message: str | None = None
-        trace_id: str | None = None
-
-        yield format_sse_event(
-            SSE_EVENT_METADATA,
-            {
-                "app_id": str(app_id),
-                "app_type": app_type,
-                "model": runtime_config.model,
-            },
+        return _Prepared(
+            app=app,
+            runtime_config=runtime_config,
+            app_config=app_config,
+            agent=agent,
+            payload=payload,
+            observation_metadata=observation_metadata,
         )
 
+    def _log_stream_finally(
+        self,
+        prep: _Prepared,
+        req_ctx: RequestContext,
+        request_type: str,
+        *,
+        success: bool,
+        full_content: str,
+        latency_ms: int,
+        trace_id: str | None,
+        error_message: str | None,
+        token_usage: dict[str, int | None],
+    ) -> None:
+        """流式执行结束后用独立 session 写日志，吞掉日志写入异常不影响流。"""
+        from app.db.session import SessionLocal
+
+        log_db = SessionLocal()
         try:
-            with propagate_attributes(metadata=observation_metadata):
-                async for event in agent.astream_events(
-                    payload, version="v2", config={"callbacks": [handler]}
-                ):
-                    kind = event.get("event")
-                    if kind == "on_chat_model_stream":
-                        chunk = event.get("data", {}).get("chunk")
-                        if chunk and hasattr(chunk, "content") and chunk.content:
-                            full_content += chunk.content
-                            yield format_sse_event(
-                                SSE_EVENT_TOKEN,
-                                {
-                                    "content": chunk.content,
-                                },
-                            )
-                        # 提取 usage（通常在最后一个 chunk 上）
-                        usage = getattr(chunk, "usage_metadata", None)
-                        if isinstance(usage, dict) and usage.get("total_tokens"):
-                            token_usage = {
-                                "total_tokens": usage.get("total_tokens"),
-                                "input_tokens": usage.get("input_tokens"),
-                                "output_tokens": usage.get("output_tokens"),
-                            }
-
-            latency_ms = int((time.perf_counter() - started_at) * 1000)
-            trace_id = handler.last_trace_id
-
-            yield format_sse_event(
-                SSE_EVENT_MESSAGE_COMPLETE,
+            response_payload = (
                 {
-                    "content": full_content,
-                    "usage": token_usage,
-                },
-            )
-            yield format_sse_event(
-                SSE_EVENT_DONE,
-                {
+                    "app_id": str(prep.app.id),
+                    "app_type": prep.app.app_type,
+                    "model": prep.runtime_config.model,
+                    "result": {"content": full_content},
                     "latency_ms": latency_ms,
-                    **token_usage,
-                },
+                }
+                if success
+                else None
             )
-            yield format_sse_done()
-
-        except Exception as exc:
-            success = False
-            error_message = str(exc)
-            latency_ms = int((time.perf_counter() - started_at) * 1000)
-            trace_id = handler.last_trace_id
-            yield format_sse_event(
-                SSE_EVENT_ERROR,
-                {
-                    "code": "INTERNAL_ERROR",
-                    "message": error_message,
-                },
+            self._log_service.log_execution(
+                log_db,
+                app=prep.app,
+                runtime_config=prep.runtime_config,
+                req_ctx=req_ctx,
+                request_type=request_type,
+                request_payload=prep.payload,
+                response_payload=response_payload,
+                success=success,
+                latency_ms=latency_ms,
+                trace_id=trace_id,
+                error_message=error_message,
+                token_usage=token_usage,
             )
-            yield format_sse_done()
-
+        except Exception:
+            logger.exception("failed to write stream log for app %s", prep.app.id)
         finally:
-            latency_ms = int((time.perf_counter() - started_at) * 1000)
-            trace_id = trace_id or handler.last_trace_id
-            log_db = SessionLocal()
-            try:
-                response_payload = (
-                    {
-                        "app_id": str(app_id),
-                        "app_type": app_type,
-                        "model": runtime_config.model,
-                        "result": {"content": full_content},
-                        "latency_ms": latency_ms,
-                    }
-                    if success
-                    else None
-                )
-                self._log_service.create_log(
-                    log_db,
-                    app_id=app_id,
-                    app_type=app_type,
-                    provider_id=runtime_config.provider_id,
-                    model_id=runtime_config.model_id,
-                    model=runtime_config.model,
-                    request_type=request_type,
-                    request_payload=payload,
-                    response_payload=response_payload,
-                    success=success,
-                    response_status=200 if success else None,
-                    latency_ms=latency_ms,
-                    error_message=error_message,
-                    langfuse_trace_id=trace_id,
-                    total_tokens=token_usage["total_tokens"],
-                    input_tokens=token_usage["input_tokens"],
-                    output_tokens=token_usage["output_tokens"],
-                    now=req_ctx.request_time_ms,
-                    user_id=req_ctx.user_id,
-                )
-            except Exception:
-                logger.exception("failed to write stream log for app %s", app_id)
-            finally:
-                log_db.close()
+            log_db.close()
 
     def _build_system_prompt(self, app_config: dict[str, Any]) -> str | None:
         value = app_config.get("system_prompt")

@@ -23,7 +23,11 @@ EASYAI_COOKIE_MAX_AGE = 8 * 3600
 
 
 @router.post("/login", response_model=Resp[UserLoginResp])
-def login(req: UserLoginReq, response: Response, db: Session = Depends(get_db)) -> Resp[UserLoginResp]:
+def login(
+    req: UserLoginReq,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> Resp[UserLoginResp]:
     data = user_service.login(db=db, req=req)
     # 全站 httpOnly cookie:浏览器流量统一走 cookie,/flowise/* 反代亦读取它
     response.set_cookie(

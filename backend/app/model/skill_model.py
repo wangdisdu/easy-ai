@@ -16,8 +16,11 @@ class SkillToolItem(BaseModel):
 # ── Skill ──
 
 
+_SKILL_NAME_PATTERN = r"^[a-z0-9-]+$"
+
+
 class SkillCreateReq(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=64, pattern=_SKILL_NAME_PATTERN)
     description: str | None = Field(default=None)
     category: str | None = Field(default=None, max_length=255)
     instruction: str = Field(min_length=1)
@@ -25,7 +28,7 @@ class SkillCreateReq(BaseModel):
 
 
 class SkillUpdateReq(BaseModel):
-    name: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=64, pattern=_SKILL_NAME_PATTERN)
     description: str | None = Field(default=None)
     category: str | None = Field(default=None, max_length=255)
     instruction: str | None = Field(default=None)

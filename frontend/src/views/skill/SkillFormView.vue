@@ -15,7 +15,11 @@
           <div class="form-row">
             <label class="form-label"><span class="required">*</span>技能名称</label>
             <div class="form-field">
-              <a-input v-model:value="form.name" placeholder="如 网页搜索、数据分析" />
+              <a-input
+                v-model:value="form.name"
+                :maxlength="64"
+                placeholder="仅小写字母、数字、连字符，如 web-search"
+              />
             </div>
           </div>
 
@@ -235,8 +239,15 @@ async function loadEditData() {
   selectedTools.value = [...s.tools];
 }
 
+const SKILL_NAME_PATTERN = /^[a-z0-9-]{1,64}$/;
+
 async function onSubmit() {
-  if (!form.name.trim()) { message.error("请填写技能名称"); return; }
+  const trimmedName = form.name.trim();
+  if (!trimmedName) { message.error("请填写技能名称"); return; }
+  if (!SKILL_NAME_PATTERN.test(trimmedName)) {
+    message.error("名称只能包含小写字母、数字和连字符，长度 1-64");
+    return;
+  }
   if (!form.instruction.trim()) { message.error("请填写技能说明"); return; }
 
   const categoryValue = form.category.length > 0 ? form.category[0] : undefined;
