@@ -9,13 +9,13 @@ from typing import Any
 
 import httpx
 from deepagents import create_deep_agent
-from deepagents.backends.utils import create_file_data
 from langfuse import propagate_attributes
 from langfuse.langchain import CallbackHandler
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.app.app_runtime import AppRuntime
+from app.app.backend_factory import BackendFactory
 from app.app.langchain_util import LangChainUtil
 from app.core.config import settings
 from app.core.error_code import ErrorCode
@@ -37,8 +37,23 @@ from app.core.sse import (
 from app.db.schema import TbApp, TbAppSkill, TbAppTool, TbMcpServer, TbSkill, TbSkillTool, TbTool
 from app.model.open_model import AgentRunRequest
 from app.service.app_log_service import ZERO_USAGE, AppLogService
+from app.service.skill_service import RESERVED_SKILL_NAMES
 
 logger = logging.getLogger(__name__)
+
+
+def _describe_exception(exc: BaseException) -> str:
+    """给 ServiceError message 取一个有信息量的描述。
+
+    Python 3.11+ 在 asyncio/anyio TaskGroup 里抛出的是 BaseExceptionGroup，
+    默认 str() 只会打印 "unhandled errors in a TaskGroup (1 sub-exception)"，
+    没有任何根因。这里递归展开 exceptions 找到第一条非 group 异常，拼出
+    "ClassName: message" 形式，方便日志和面向用户的错误文案。
+    """
+    current: BaseException = exc
+    while isinstance(current, BaseExceptionGroup) and current.exceptions:
+        current = current.exceptions[0]
+    return f"{type(current).__name__}: {current}"
 
 
 @dataclass
@@ -61,12 +76,14 @@ class AgentApp:
         app_runtime: AppRuntime | None = None,
         langchain_util: LangChainUtil | None = None,
         log_service: AppLogService | None = None,
+        backend_factory: BackendFactory | None = None,
     ) -> None:
         self._app_runtime = app_runtime or AppRuntime()
         self._langchain_util = langchain_util or LangChainUtil()
         self._log_service = log_service or AppLogService(
             SnowflakeGenerator(settings.snowflake_worker_id)
         )
+        self._backend_factory = backend_factory or BackendFactory()
 
     def run(
         self,
@@ -109,6 +126,7 @@ class AgentApp:
             return response
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.exception("agent app %s run failed", prep.app.id)
             self._log_service.log_execution(
                 db,
                 app=prep.app,
@@ -120,7 +138,7 @@ class AgentApp:
                 success=False,
                 latency_ms=latency_ms,
                 trace_id=handler.last_trace_id,
-                error_message=str(exc),
+                error_message=_describe_exception(exc),
                 token_usage=dict(ZERO_USAGE),
             )
             raise
@@ -233,8 +251,9 @@ class AgentApp:
 
         except Exception as exc:
             success = False
-            error_message = str(exc)
+            error_message = _describe_exception(exc)
             trace_id = handler.last_trace_id
+            logger.exception("agent app %s stream failed", prep.app.id)
             yield format_sse_event(
                 SSE_EVENT_ERROR,
                 {"code": "INTERNAL_ERROR", "message": error_message},
@@ -264,24 +283,30 @@ class AgentApp:
         runtime_config = self._app_runtime.build_chat_runtime(db, req.app_id)
         app_config = self._app_runtime.get_app_config(db, req.app_id)
         model = self._langchain_util.build_chat_model(runtime_config)
-        tools = self._build_tools(db, req.app_id)
+        # 主 agent 只挂应用直接绑定的工具；技能工具随技能 subagent 懒加载，
+        # 避免所有技能的工具 schema 从第一轮就挤占主 agent 上下文。
+        tools = self._build_app_tools(db, req.app_id)
         system_prompt = (app_config.get("system_prompt") or "").strip()
-        skill_files = self._build_skill_files(db, req.app_id)
+        backend = self._backend_factory.create(app_config)
+
+        skill_subagents = self._build_skill_subagents(db, req.app_id, model=model)
+        extra_subagents = app_config.get("sub_agents")
+        all_subagents: list[Any] = list(skill_subagents)
+        if isinstance(extra_subagents, list):
+            all_subagents.extend(extra_subagents)
+
         agent_kwargs: dict[str, Any] = {
             "model": model,
             "tools": tools,
             "system_prompt": system_prompt,
-            "skills": ["/skills/"],
+            "backend": backend,
         }
-        subagents = app_config.get("sub_agents")
-        if isinstance(subagents, list) and subagents:
-            agent_kwargs["subagents"] = subagents
+        if all_subagents:
+            agent_kwargs["subagents"] = all_subagents
         agent = create_deep_agent(**agent_kwargs)
         payload: dict[str, Any] = {
             "messages": [message.model_dump() for message in req.messages],
         }
-        if skill_files:
-            payload["files"] = skill_files
         observation_metadata = {
             "app_id": str(app.id),
             "app_name": app.name,
@@ -345,52 +370,70 @@ class AgentApp:
         finally:
             log_db.close()
 
-    def _build_skill_files(self, db: Session, app_id: int) -> dict[str, Any]:
-        """把绑定到应用的 enabled 技能合成虚拟 SKILL.md，供 DeepAgents SkillsMiddleware 读取。
+    def _build_app_tools(self, db: Session, app_id: int) -> list[Any]:
+        """仅收集应用直接绑定的工具。
 
-        每条返回值形如 {"/skills/<name>/SKILL.md": FileData}，可直接合并进 invoke/astream_events
-        的 payload 的 files 字段。StateBackend 会从中读出技能目录与内容。
+        技能绑定的工具不在这里加载——它们会进入对应技能 subagent 的 tools，只在
+        主 agent 委派到该技能时才出现在模型可见范围。
         """
-        files: dict[str, Any] = {}
+        tool_ids: list[int] = []
+        seen: set[int] = set()
+        for binding in db.scalars(select(TbAppTool).where(TbAppTool.app_id == app_id)).all():
+            if binding.tool_id not in seen:
+                seen.add(binding.tool_id)
+                tool_ids.append(binding.tool_id)
+        return self._load_tools_by_ids(db, tool_ids)
+
+    def _build_skill_subagents(
+        self, db: Session, app_id: int, *, model: Any
+    ) -> list[dict[str, Any]]:
+        """每个 enabled 绑定技能渲染成一个 SubAgent 规格。
+
+        - name/description 来自 TbSkill，主 agent 通过 task 工具按名字委派
+        - system_prompt 用 skill.instruction（渐进披露：主 agent 看不到，委派时才进入上下文）
+        - tools 只含该技能通过 TbSkillTool 声明的工具，天然做到工具隔离
+        """
+        subagents: list[dict[str, Any]] = []
         bindings = db.scalars(select(TbAppSkill).where(TbAppSkill.app_id == app_id)).all()
         for binding in bindings:
             skill = db.get(TbSkill, binding.skill_id)
             if not skill or skill.skill_status != "enabled":
                 continue
-            description = skill.description or skill.name
-            if len(description) > 1024:
-                description = description[:1024]
-            content = (
-                "---\n"
-                f"name: {skill.name}\n"
-                f"description: {description}\n"
-                "---\n\n"
-                f"{skill.instruction}"
-            )
-            files[f"/skills/{skill.name}/SKILL.md"] = create_file_data(content)
-        return files
-
-    def _build_tools(self, db: Session, app_id: int) -> list[Any]:
-        # 收集应用直接绑定的工具 + 应用所绑定技能依赖的工具，按 tool_id 去重
-        tool_ids: list[int] = []
-        seen: set[int] = set()
-
-        for binding in db.scalars(select(TbAppTool).where(TbAppTool.app_id == app_id)).all():
-            if binding.tool_id not in seen:
-                seen.add(binding.tool_id)
-                tool_ids.append(binding.tool_id)
-
-        skill_bindings = db.scalars(select(TbAppSkill).where(TbAppSkill.app_id == app_id)).all()
-        if skill_bindings:
-            skill_ids = [b.skill_id for b in skill_bindings]
-            skill_tool_rows = db.scalars(
-                select(TbSkillTool).where(TbSkillTool.skill_id.in_(skill_ids))
+            # 和 DeepAgents 内置 general-purpose 同名会顶替框架默认子代理，
+            # service 层已在写入时拦截，这里做一次兜底防历史脏数据。
+            if skill.name.strip().lower() in RESERVED_SKILL_NAMES:
+                logger.warning(
+                    "skipping skill %s (id=%s): name collides with reserved subagent",
+                    skill.name,
+                    skill.id,
+                )
+                continue
+            tool_rows = db.scalars(
+                select(TbSkillTool).where(TbSkillTool.skill_id == skill.id)
             ).all()
-            for row in skill_tool_rows:
+            # 按 tool_id 去重，保持声明顺序
+            tool_ids: list[int] = []
+            seen: set[int] = set()
+            for row in tool_rows:
                 if row.tool_id not in seen:
                     seen.add(row.tool_id)
                     tool_ids.append(row.tool_id)
+            skill_tools = self._load_tools_by_ids(db, tool_ids)
+            description = (skill.description or skill.name).strip()
+            if len(description) > 1024:
+                description = description[:1024]
+            subagents.append(
+                {
+                    "name": skill.name,
+                    "description": description,
+                    "system_prompt": skill.instruction,
+                    "tools": skill_tools,
+                    "model": model,
+                }
+            )
+        return subagents
 
+    def _load_tools_by_ids(self, db: Session, tool_ids: list[int]) -> list[Any]:
         tools: list[Any] = []
         for tool_id in tool_ids:
             tool = db.get(TbTool, tool_id)
@@ -450,11 +493,14 @@ class AgentApp:
                     headers=headers,
                 )
             except ServiceError:
+                logger.exception("mcp tool %s raised ServiceError", remote_tool_name)
                 raise
             except Exception as exc:
+                logger.exception("mcp tool %s invocation failed", remote_tool_name)
                 raise ServiceError(
                     ErrorCode.INTERNAL_ERROR,
-                    f"mcp tool {remote_tool_name} invocation failed: {exc}",
+                    f"mcp tool {remote_tool_name} invocation failed: "
+                    f"{_describe_exception(exc)}",
                 ) from exc
 
         return call_mcp_tool
@@ -477,50 +523,64 @@ class AgentApp:
         headers_config = api_config.get("headers") or []
         body_template = api_config.get("body")
 
+        tool_name = tool.tool_name
+
         def call_api_tool(**kwargs: Any) -> str:
-            final_url = self._render_template(url, kwargs)
-            if not final_url:
-                raise ServiceError(ErrorCode.BAD_REQUEST, f"tool {tool.tool_name} api url missing")
+            try:
+                final_url = self._render_template(url, kwargs)
+                if not final_url:
+                    raise ServiceError(ErrorCode.BAD_REQUEST, f"tool {tool_name} api url missing")
 
-            headers: dict[str, str] = {}
-            if isinstance(headers_config, list):
-                for item in headers_config:
-                    if not isinstance(item, dict):
-                        continue
-                    key = item.get("key")
-                    if not key:
-                        continue
-                    headers[str(key)] = self._render_template(str(item.get("value") or ""), kwargs)
+                headers: dict[str, str] = {}
+                if isinstance(headers_config, list):
+                    for item in headers_config:
+                        if not isinstance(item, dict):
+                            continue
+                        key = item.get("key")
+                        if not key:
+                            continue
+                        headers[str(key)] = self._render_template(
+                            str(item.get("value") or ""), kwargs
+                        )
 
-            json_body: Any = None
-            content: str | None = None
-            if isinstance(body_template, dict):
-                json_body = self._render_object(body_template, kwargs)
-            elif isinstance(body_template, str) and body_template:
-                rendered = self._render_template(body_template, kwargs)
-                try:
-                    json_body = json.loads(rendered)
-                except ValueError:
-                    content = rendered
+                json_body: Any = None
+                content: str | None = None
+                if isinstance(body_template, dict):
+                    json_body = self._render_object(body_template, kwargs)
+                elif isinstance(body_template, str) and body_template:
+                    rendered = self._render_template(body_template, kwargs)
+                    try:
+                        json_body = json.loads(rendered)
+                    except ValueError:
+                        content = rendered
 
-            with httpx.Client(timeout=30.0) as client:
-                response = client.request(
-                    method,
-                    final_url,
-                    headers=headers,
-                    json=json_body,
-                    content=content,
-                )
-            if response.status_code >= 400:
-                error_detail = (
-                    f"tool {tool.tool_name} request failed: "
-                    f"status={response.status_code}, body={response.text}"
-                )
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.request(
+                        method,
+                        final_url,
+                        headers=headers,
+                        json=json_body,
+                        content=content,
+                    )
+                if response.status_code >= 400:
+                    error_detail = (
+                        f"tool {tool_name} request failed: "
+                        f"status={response.status_code}, body={response.text}"
+                    )
+                    raise ServiceError(
+                        ErrorCode.INTERNAL_ERROR,
+                        error_detail,
+                    )
+                return response.text
+            except ServiceError:
+                logger.exception("api tool %s raised ServiceError", tool_name)
+                raise
+            except Exception as exc:
+                logger.exception("api tool %s invocation failed", tool_name)
                 raise ServiceError(
                     ErrorCode.INTERNAL_ERROR,
-                    error_detail,
-                )
-            return response.text
+                    f"api tool {tool_name} invocation failed: {_describe_exception(exc)}",
+                ) from exc
 
         return call_api_tool
 

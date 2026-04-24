@@ -22,6 +22,20 @@ VALID_STATUSES = {"enabled", "disabled", "draft"}
 
 DEFAULT_CATEGORIES = ["文本处理", "信息检索", "代码与推理", "数据处理", "多模态", "编排调度"]
 
+# 与 DeepAgents 内置 subagent 同名会顶替框架默认的 general-purpose 通用代理
+# （见 deepagents/graph.py 的 insert 判定）。大小写不敏感地拦截。
+RESERVED_SKILL_NAMES = frozenset({"general-purpose"})
+
+
+def _validate_skill_name(name: str | None) -> None:
+    if name is None:
+        return
+    if name.strip().lower() in RESERVED_SKILL_NAMES:
+        raise ServiceError(
+            ErrorCode.BAD_REQUEST,
+            f"skill name '{name}' is reserved",
+        )
+
 
 class SkillService:
     def __init__(self, id_generator: SnowflakeGenerator) -> None:
@@ -81,6 +95,7 @@ class SkillService:
     # ── CRUD ──
 
     def create_skill(self, db: Session, req: SkillCreateReq, req_ctx: RequestContext) -> SkillResp:
+        _validate_skill_name(req.name)
         now = req_ctx.request_time_ms
         entity = TbSkill(
             id=self._id_generator.next_id(),
@@ -145,6 +160,7 @@ class SkillService:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "skill not found")
 
         if req.name is not None:
+            _validate_skill_name(req.name)
             entity.name = req.name
         if req.description is not None:
             entity.description = req.description
