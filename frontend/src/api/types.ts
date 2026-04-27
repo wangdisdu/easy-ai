@@ -64,6 +64,7 @@ export interface AppResp {
   access_scope?: string | null;
   rate_limit?: number | null;
   enable_log?: boolean | null;
+  enable_long_session?: boolean | null;
   version_id?: string | null;
   current_version?: string | null;
   flowise_chatflow_id?: string | null;
@@ -257,6 +258,7 @@ export interface LlmModelResp {
   model: string;
   model_type: string;
   status: string;
+  max_input_tokens?: number | null;
 }
 
 export interface LlmProviderResp {

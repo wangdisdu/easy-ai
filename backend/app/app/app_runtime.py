@@ -91,4 +91,5 @@ class AppRuntime:
             provider_id=provider_entity.id,
             model_id=model_entity.id,
             model_setting=model_setting or {},
+            max_input_tokens=model_entity.max_input_tokens,
         )

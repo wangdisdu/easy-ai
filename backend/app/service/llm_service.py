@@ -85,6 +85,7 @@ class LlmService:
                 model=m.model,
                 model_type=m.model_type,
                 status="active",
+                max_input_tokens=m.max_input_tokens,
                 create_time=now,
                 update_time=now,
                 create_user=req_ctx.user_id,
@@ -318,6 +319,7 @@ class LlmService:
             model=req.model,
             model_type=req.model_type,
             status="active",
+            max_input_tokens=req.max_input_tokens,
             create_time=now,
             update_time=now,
             create_user=req_ctx.user_id,
@@ -341,6 +343,8 @@ class LlmService:
             if req.model_type not in VALID_MODEL_TYPES:
                 raise ServiceError(ErrorCode.BAD_REQUEST, f"invalid model_type: {req.model_type}")
             entity.model_type = req.model_type
+        if req.max_input_tokens is not None:
+            entity.max_input_tokens = req.max_input_tokens
         entity.update_time = req_ctx.request_time_ms
         entity.update_user = req_ctx.user_id
         db.commit()

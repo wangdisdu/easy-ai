@@ -60,8 +60,8 @@ def update_user(
 
 
 @router.delete("/{user_id}", response_model=Resp[bool])
-def delete_user(user_id: str, db: Session = Depends(get_db)) -> Resp[bool]:
-    user_service.delete_user(db=db, user_id=int(user_id))
+async def delete_user(user_id: str, db: Session = Depends(get_db)) -> Resp[bool]:
+    await user_service.delete_user(db=db, user_id=int(user_id))
     return Resp(data=True)
 
 

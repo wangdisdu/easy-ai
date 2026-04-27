@@ -90,6 +90,12 @@
                   {{ record.model_type }}
                 </a-tag>
               </template>
+              <template v-else-if="column.key === 'max_input_tokens'">
+                <span v-if="record.max_input_tokens" class="llm-tokens">
+                  {{ record.max_input_tokens.toLocaleString() }}
+                </span>
+                <span v-else class="llm-tokens-unset">—</span>
+              </template>
               <template v-else-if="column.key === 'status'">
                 <a-tag :color="record.status === 'active' ? 'success' : 'default'" size="small">
                   {{ record.status === "active" ? "启用" : "禁用" }}
@@ -233,6 +239,20 @@
             </a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item
+          v-if="addModelForm.model_type === 'LLM'"
+          label="最大输入 token"
+          name="max_input_tokens"
+          extra="非必填。配上后摘要中间件按此值的 85% 触发；不填则走 170k 兜底"
+        >
+          <a-input-number
+            v-model:value="addModelForm.max_input_tokens"
+            :min="1"
+            :step="1000"
+            placeholder="例如 32000 / 128000 / 200000"
+            style="width: 100%"
+          />
+        </a-form-item>
       </a-form>
     </a-modal>
   </div>
@@ -276,6 +296,7 @@ const providerTypeValueMap: Record<string, string> = {
 const modelColumns = [
   { title: "模型", dataIndex: "model", key: "model" },
   { title: "类型", key: "model_type", align: "center" as const, width: 100 },
+  { title: "最大输入 token", key: "max_input_tokens", align: "right" as const, width: 130 },
   { title: "状态", key: "status", align: "center" as const, width: 80 },
   { title: "操作", key: "actions", align: "right" as const, width: 120 },
 ];
@@ -321,9 +342,14 @@ const addModelFormRef = ref<FormInstance>();
 const addModelProviderId = ref("");
 const availableModelsLoading = ref(false);
 const availableModelOptions = ref<Array<{ label: string; value: string }>>([]);
-const addModelForm = reactive({
+const addModelForm = reactive<{
+  model: string;
+  model_type: string;
+  max_input_tokens: number | null;
+}>({
   model: "",
   model_type: "LLM",
+  max_input_tokens: null,
 });
 const addModelRules: Record<string, Rule[]> = {
   model: [{ required: true, message: "请输入模型名称" }],
@@ -475,6 +501,7 @@ function openAddModel(provider: LlmProviderResp) {
   addModelProviderId.value = provider.id;
   addModelForm.model = "";
   addModelForm.model_type = "LLM";
+  addModelForm.max_input_tokens = null;
   void loadAvailableModels(provider.id);
   addModelOpen.value = true;
 }
@@ -490,6 +517,8 @@ async function submitAddModel() {
     await api.createModel(addModelProviderId.value, {
       model: addModelForm.model,
       model_type: addModelForm.model_type,
+      max_input_tokens:
+        addModelForm.model_type === "LLM" ? addModelForm.max_input_tokens : null,
     });
     message.success("添加成功");
     addModelOpen.value = false;

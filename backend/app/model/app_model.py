@@ -19,6 +19,8 @@ class AppCreateReq(BaseModel):
     access_scope: str | None = Field(default="internal", max_length=255)
     rate_limit: int | None = Field(default=60, ge=1)
     enable_log: bool | None = Field(default=True)
+    # 仅 agent 应用使用：长会话开关，开启后 Checkpointer 持久化运行态
+    enable_long_session: bool | None = Field(default=False)
     # 仅 agent 应用使用：绑定的工具/技能 ID 列表
     tool_ids: list[str] | None = Field(default=None)
     skill_ids: list[str] | None = Field(default=None)
@@ -34,6 +36,7 @@ class AppUpdateReq(BaseModel):
     access_scope: str | None = Field(default=None, max_length=255)
     rate_limit: int | None = Field(default=None, ge=1)
     enable_log: bool | None = Field(default=None)
+    enable_long_session: bool | None = Field(default=None)
     # 仅 agent 应用使用：绑定的工具/技能 ID 列表，None 表示不更新，[] 表示清空
     tool_ids: list[str] | None = Field(default=None)
     skill_ids: list[str] | None = Field(default=None)
@@ -66,6 +69,7 @@ class AppResp(BaseModel):
     access_scope: str | None = None
     rate_limit: int | None = None
     enable_log: bool | None = None
+    enable_long_session: bool | None = None
     version_id: str | None = None
     current_version: str | None = None
     # 仅 agent_flow 类型有值：对应 Flowise 端的 chatflow uuid
@@ -94,6 +98,7 @@ class AppResp(BaseModel):
             access_scope=entity.access_scope,
             rate_limit=entity.rate_limit,
             enable_log=bool(entity.enable_log) if entity.enable_log is not None else None,
+            enable_long_session=bool(entity.enable_long_session),
             version_id=entity.version_id,
             current_version=entity.current_version,
             flowise_chatflow_id=entity.flowise_chatflow_id,

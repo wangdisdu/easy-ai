@@ -10,6 +10,7 @@ from app.db.schema import TbLlmModel, TbLlmProvider
 class LlmModelItem(BaseModel):
     model: str = Field(min_length=1, max_length=255)
     model_type: str = Field(min_length=1, max_length=255)
+    max_input_tokens: int | None = Field(default=None, ge=1)
 
 
 # ── Provider ──
@@ -41,6 +42,7 @@ class LlmModelResp(BaseModel):
     model: str
     model_type: str
     status: str
+    max_input_tokens: int | None = None
 
     @classmethod
     def from_entity(cls, entity: TbLlmModel) -> LlmModelResp:
@@ -49,6 +51,7 @@ class LlmModelResp(BaseModel):
             model=entity.model,
             model_type=entity.model_type,
             status=entity.status,
+            max_input_tokens=entity.max_input_tokens,
         )
 
 
@@ -88,8 +91,10 @@ class LlmProviderResp(BaseModel):
 class LlmModelCreateReq(BaseModel):
     model: str = Field(min_length=1, max_length=255)
     model_type: str = Field(min_length=1, max_length=255)
+    max_input_tokens: int | None = Field(default=None, ge=1)
 
 
 class LlmModelUpdateReq(BaseModel):
     model: str | None = Field(default=None, max_length=255)
     model_type: str | None = Field(default=None, max_length=255)
+    max_input_tokens: int | None = Field(default=None, ge=1)

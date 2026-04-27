@@ -181,10 +181,16 @@ class UserService:
         role_map = self._load_user_roles(db, [user.id])
         return UserResp.from_entity(user, role_map.get(user.id))
 
-    def delete_user(self, db: Session, user_id: int) -> None:
+    async def delete_user(self, db: Session, user_id: int) -> None:
         user = db.get(TbUser, user_id)
         if not user:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "user not found")
+        # 被遗忘权：先清掉该用户所有会话的运行态 checkpoint，再删用户行。
+        # 业务消息保留与否由后续合规流程决定，本方法只负责运行态侧的级联。
+        from app.service.conversation_service import ConversationService
+
+        conv_service = ConversationService(self._id_generator)
+        await conv_service.cascade_delete_user_checkpoints(db, user_id)
         db.query(TbUserRole).filter(TbUserRole.user_id == user_id).delete()
         db.delete(user)
         db.commit()

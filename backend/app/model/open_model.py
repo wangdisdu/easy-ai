@@ -17,6 +17,8 @@ class LiteLLMRuntimeConfig(BaseModel):
     provider_id: int | None = None
     model_id: int | None = None
     model_setting: dict[str, Any] = Field(default_factory=dict)
+    # 模型最大输入 token；None 时摘要中间件回退到 170k 兜底
+    max_input_tokens: int | None = None
 
 
 class AppLogResp(BaseModel):
@@ -96,6 +98,12 @@ class AgentRunRequest(BaseModel):
     app_id: int = 0
     messages: list[ModelGatewayChatMessage] = Field(default_factory=list)
     variables: dict[str, Any] = Field(default_factory=dict)
+    # 长会话 LangGraph 线程标识；启用 checkpoint 时由调用方提供 str(conversation_id)
+    thread_id: str | None = None
+    # 是否走 Checkpointer：True 时 messages 只需带本轮新消息（历史由 saver 恢复）
+    use_checkpoint: bool = False
+    # 仅用作 SSE 提示信号：本轮是否走过"checkpoint 缺失 + 业务消息重建"的降级路径
+    degraded: bool = False
 
 
 class RagRunRequest(BaseModel):

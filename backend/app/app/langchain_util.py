@@ -16,12 +16,20 @@ class LangChainUtil:
     """LangChain 对接 LiteLLM 网关。"""
 
     def build_chat_model(self, runtime_config: LiteLLMRuntimeConfig) -> Any:
-        return ChatOpenAI(
+        model = ChatOpenAI(
             model=runtime_config.model,
             base_url=runtime_config.base_url,
             api_key=runtime_config.api_key,
             **dict(runtime_config.model_setting),
         )
+        # 把 DB 配置的 max_input_tokens 灌进 model.profile，让 DeepAgents 的
+        # SummarizationMiddleware 走 fraction 触发条件，而不是 170k 兜底。
+        # 私有 / 国产模型 LangChain 注册表通常没有 profile，这里覆盖式合并。
+        if runtime_config.max_input_tokens is not None:
+            existing = dict(model.profile or {})
+            existing["max_input_tokens"] = runtime_config.max_input_tokens
+            model.profile = existing
+        return model
 
     def build_structured_tool(
         self,

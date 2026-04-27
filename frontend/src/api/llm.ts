@@ -6,6 +6,7 @@ import type { ApiPageResp, ApiResp, LlmModelResp, LlmProviderResp } from "./type
 export interface LlmModelItem {
   model: string;
   model_type: string;
+  max_input_tokens?: number | null;
 }
 
 export interface LlmProviderCreateBody {
@@ -56,11 +57,13 @@ export function getProviderAvailableModels(id: string) {
 export interface LlmModelCreateBody {
   model: string;
   model_type: string;
+  max_input_tokens?: number | null;
 }
 
 export interface LlmModelUpdateBody {
   model?: string;
   model_type?: string;
+  max_input_tokens?: number | null;
 }
 
 export function createModel(providerId: string, body: LlmModelCreateBody) {

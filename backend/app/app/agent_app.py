@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.app.app_runtime import AppRuntime
 from app.app.backend_factory import BackendFactory
+from app.app.checkpointer_factory import CheckpointerFactory, get_checkpointer_factory
 from app.app.langchain_util import LangChainUtil
 from app.core.config import settings
 from app.core.error_code import ErrorCode
@@ -66,6 +67,19 @@ class _Prepared:
     agent: Any
     payload: dict[str, Any]
     observation_metadata: dict[str, Any]
+    thread_id: str | None
+    use_checkpoint: bool
+    degraded: bool
+
+    def invoke_config(self, handler: Any) -> dict[str, Any]:
+        """组装 ainvoke / astream_events 的 config。
+
+        启用 checkpoint 时必须带 configurable.thread_id，LangGraph 据此查找/写入快照。
+        """
+        config: dict[str, Any] = {"callbacks": [handler]}
+        if self.use_checkpoint and self.thread_id:
+            config["configurable"] = {"thread_id": self.thread_id}
+        return config
 
 
 class AgentApp:
@@ -77,6 +91,7 @@ class AgentApp:
         langchain_util: LangChainUtil | None = None,
         log_service: AppLogService | None = None,
         backend_factory: BackendFactory | None = None,
+        checkpointer_factory: CheckpointerFactory | None = None,
     ) -> None:
         self._app_runtime = app_runtime or AppRuntime()
         self._langchain_util = langchain_util or LangChainUtil()
@@ -84,8 +99,9 @@ class AgentApp:
             SnowflakeGenerator(settings.snowflake_worker_id)
         )
         self._backend_factory = backend_factory or BackendFactory()
+        self._checkpointer_factory = checkpointer_factory or get_checkpointer_factory()
 
-    def run(
+    async def run(
         self,
         db: Session,
         req: AgentRunRequest,
@@ -98,7 +114,7 @@ class AgentApp:
         started_at = time.perf_counter()
         try:
             with propagate_attributes(metadata=prep.observation_metadata):
-                result = prep.agent.invoke(prep.payload, config={"callbacks": [handler]})
+                result = await prep.agent.ainvoke(prep.payload, config=prep.invoke_config(handler))
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             serialized_result = self._langchain_util.serialize_result(result)
             token_usage = self._langchain_util.extract_token_usage(serialized_result)
@@ -170,22 +186,42 @@ class AgentApp:
         error_message: str | None = None
         trace_id: str | None = None
 
-        yield format_sse_event(
-            SSE_EVENT_METADATA,
-            {
-                "app_id": str(prep.app.id),
-                "app_type": prep.app.app_type,
-                "model": prep.runtime_config.model,
-            },
-        )
+        metadata_event: dict[str, Any] = {
+            "app_id": str(prep.app.id),
+            "app_type": prep.app.app_type,
+            "model": prep.runtime_config.model,
+        }
+        if prep.use_checkpoint and prep.thread_id:
+            metadata_event["thread_id"] = prep.thread_id
+        if prep.degraded:
+            metadata_event["degraded"] = True
+        yield format_sse_event(SSE_EVENT_METADATA, metadata_event)
+
+        # 卡顿诊断：跟踪 LLM 调用 / 工具调用的起止 timing。
+        # 出问题时 tail log，"X_start 没有对应 X_end"那条就是卡的位置。
+        chat_model_started_at: float | None = None
+        tool_call_starts: dict[str, tuple[str, float]] = {}  # run_id -> (name, t0)
 
         try:
             with propagate_attributes(metadata=prep.observation_metadata):
                 async for event in prep.agent.astream_events(
-                    prep.payload, version="v2", config={"callbacks": [handler]}
+                    prep.payload, version="v2", config=prep.invoke_config(handler)
                 ):
                     kind = event.get("event")
                     data = event.get("data") or {}
+
+                    if kind == "on_chat_model_start":
+                        chat_model_started_at = time.perf_counter()
+                        logger.info("[stream] thread=%s chat_model_start", prep.thread_id)
+                    elif kind == "on_chat_model_end":
+                        if chat_model_started_at is not None:
+                            elapsed = time.perf_counter() - chat_model_started_at
+                            logger.info(
+                                "[stream] thread=%s chat_model_end elapsed=%.2fs",
+                                prep.thread_id,
+                                elapsed,
+                            )
+                            chat_model_started_at = None
 
                     if kind == "on_chat_model_stream":
                         chunk = data.get("chunk")
@@ -199,35 +235,67 @@ class AgentApp:
                                 accumulated[key] += usage.get(key, 0)
 
                     elif kind == "on_tool_start":
+                        run_id = event.get("run_id", "")
+                        tool_name = event.get("name", "")
+                        tool_call_starts[run_id] = (tool_name, time.perf_counter())
+                        logger.info(
+                            "[stream] thread=%s tool_start name=%s run_id=%s",
+                            prep.thread_id,
+                            tool_name,
+                            run_id,
+                        )
                         yield format_sse_event(
                             SSE_EVENT_TOOL_CALL_START,
                             {
-                                "tool_call_id": event.get("run_id", ""),
-                                "name": event.get("name", ""),
+                                "tool_call_id": run_id,
+                                "name": tool_name,
                                 "arguments": data.get("input", {}),
                             },
                         )
 
                     elif kind == "on_tool_end":
+                        run_id = event.get("run_id", "")
+                        tool_name = event.get("name", "")
+                        if run_id in tool_call_starts:
+                            _, t0 = tool_call_starts.pop(run_id)
+                            elapsed = time.perf_counter() - t0
+                            logger.info(
+                                "[stream] thread=%s tool_end name=%s elapsed=%.2fs",
+                                prep.thread_id,
+                                tool_name,
+                                elapsed,
+                            )
                         output = data.get("output", "")
                         if hasattr(output, "content"):
                             output = output.content
                         yield format_sse_event(
                             SSE_EVENT_TOOL_CALL_END,
                             {
-                                "tool_call_id": event.get("run_id", ""),
-                                "name": event.get("name", ""),
+                                "tool_call_id": run_id,
+                                "name": tool_name,
                                 "result": str(output) if output else "",
                                 "status": "success",
                             },
                         )
 
                     elif kind == "on_tool_error":
+                        run_id = event.get("run_id", "")
+                        tool_name = event.get("name", "")
+                        if run_id in tool_call_starts:
+                            _, t0 = tool_call_starts.pop(run_id)
+                            elapsed = time.perf_counter() - t0
+                            logger.warning(
+                                "[stream] thread=%s tool_error name=%s elapsed=%.2fs error=%s",
+                                prep.thread_id,
+                                tool_name,
+                                elapsed,
+                                data.get("error"),
+                            )
                         yield format_sse_event(
                             SSE_EVENT_TOOL_CALL_END,
                             {
-                                "tool_call_id": event.get("run_id", ""),
-                                "name": event.get("name", ""),
+                                "tool_call_id": run_id,
+                                "name": tool_name,
                                 "result": str(data.get("error", "")),
                                 "status": "error",
                             },
@@ -295,6 +363,9 @@ class AgentApp:
         if isinstance(extra_subagents, list):
             all_subagents.extend(extra_subagents)
 
+        # use_checkpoint 同时受请求字段和 app 开关约束：调用方明示开启 + app 配置允许。
+        # thread_id 缺失时即使开启也降级为不写 checkpoint，避免运行态污染。
+        use_checkpoint = bool(req.use_checkpoint and app.enable_long_session and req.thread_id)
         agent_kwargs: dict[str, Any] = {
             "model": model,
             "tools": tools,
@@ -303,6 +374,8 @@ class AgentApp:
         }
         if all_subagents:
             agent_kwargs["subagents"] = all_subagents
+        if use_checkpoint:
+            agent_kwargs["checkpointer"] = self._checkpointer_factory.get()
         agent = create_deep_agent(**agent_kwargs)
         payload: dict[str, Any] = {
             "messages": [message.model_dump() for message in req.messages],
@@ -320,6 +393,9 @@ class AgentApp:
             agent=agent,
             payload=payload,
             observation_metadata=observation_metadata,
+            thread_id=req.thread_id,
+            use_checkpoint=use_checkpoint,
+            degraded=req.degraded,
         )
 
     def _log_stream_finally(
@@ -483,20 +559,39 @@ class AgentApp:
         headers = self._parse_mcp_headers(server.headers)
         remote_tool_name = tool.tool_name
 
+        timeout_seconds = settings.mcp_tool_timeout_seconds
+
         def call_mcp_tool(**kwargs: Any) -> str:
+            t0 = time.perf_counter()
+            logger.info("mcp tool %s call start (timeout=%.0fs)", remote_tool_name, timeout_seconds)
             try:
-                return mcp_call_tool(
+                result = mcp_call_tool(
                     transport=transport,
                     url=endpoint_url,
                     tool_name=remote_tool_name,
                     arguments=kwargs,
                     headers=headers,
+                    timeout=timeout_seconds,
                 )
+                logger.info(
+                    "mcp tool %s call done elapsed=%.2fs",
+                    remote_tool_name,
+                    time.perf_counter() - t0,
+                )
+                return result
             except ServiceError:
-                logger.exception("mcp tool %s raised ServiceError", remote_tool_name)
+                logger.exception(
+                    "mcp tool %s raised ServiceError after %.2fs",
+                    remote_tool_name,
+                    time.perf_counter() - t0,
+                )
                 raise
             except Exception as exc:
-                logger.exception("mcp tool %s invocation failed", remote_tool_name)
+                logger.exception(
+                    "mcp tool %s invocation failed after %.2fs",
+                    remote_tool_name,
+                    time.perf_counter() - t0,
+                )
                 raise ServiceError(
                     ErrorCode.INTERNAL_ERROR,
                     f"mcp tool {remote_tool_name} invocation failed: "
@@ -526,6 +621,8 @@ class AgentApp:
         tool_name = tool.tool_name
 
         def call_api_tool(**kwargs: Any) -> str:
+            t0 = time.perf_counter()
+            logger.info("api tool %s call start", tool_name)
             try:
                 final_url = self._render_template(url, kwargs)
                 if not final_url:
@@ -571,12 +668,25 @@ class AgentApp:
                         ErrorCode.INTERNAL_ERROR,
                         error_detail,
                     )
+                logger.info(
+                    "api tool %s call done elapsed=%.2fs",
+                    tool_name,
+                    time.perf_counter() - t0,
+                )
                 return response.text
             except ServiceError:
-                logger.exception("api tool %s raised ServiceError", tool_name)
+                logger.exception(
+                    "api tool %s raised ServiceError after %.2fs",
+                    tool_name,
+                    time.perf_counter() - t0,
+                )
                 raise
             except Exception as exc:
-                logger.exception("api tool %s invocation failed", tool_name)
+                logger.exception(
+                    "api tool %s invocation failed after %.2fs",
+                    tool_name,
+                    time.perf_counter() - t0,
+                )
                 raise ServiceError(
                     ErrorCode.INTERNAL_ERROR,
                     f"api tool {tool_name} invocation failed: {_describe_exception(exc)}",

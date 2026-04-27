@@ -143,20 +143,34 @@ def call_tool(
         tool_name: tool name to invoke
         arguments: arguments dict matching the tool input schema
         headers: optional HTTP headers (e.g. auth)
-        timeout: max wait in seconds
+        timeout: max wait in seconds; enforced inside the coroutine via
+            ``asyncio.timeout`` so it fires regardless of how ``_run_sync``
+            schedules execution. Raises ``TimeoutError`` on expiry.
 
     Raises:
         ValueError: invalid transport
+        TimeoutError: tool didn't return within ``timeout`` seconds
         RuntimeError: tool reported an error
     """
     if transport == "sse":
-        coro = _call_sse(url, headers, tool_name, arguments)
+        inner = _call_sse(url, headers, tool_name, arguments)
     elif transport == "streamable_http":
-        coro = _call_streamable_http(url, headers, tool_name, arguments)
+        inner = _call_streamable_http(url, headers, tool_name, arguments)
     else:
         raise ValueError(f"unsupported transport: {transport}")
 
-    return _run_sync(coro, timeout=timeout)
+    return _run_sync(_with_timeout(inner, timeout, tool_name), timeout=timeout)
+
+
+async def _with_timeout(coro: Any, timeout: float, tool_name: str) -> Any:
+    """把 timeout 推到协程内部，asyncio.timeout 会真正取消未完成的子任务，
+    避免 ``Future.result(timeout=...)`` 那种"主线程不等了但底层还在跑"的资源泄漏。
+    """
+    try:
+        async with asyncio.timeout(timeout):
+            return await coro
+    except TimeoutError as exc:
+        raise TimeoutError(f"mcp tool {tool_name} did not respond within {timeout:.0f}s") from exc
 
 
 def _coerce_call_result(result: Any, tool_name: str) -> str:

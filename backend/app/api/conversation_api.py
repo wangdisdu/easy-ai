@@ -63,13 +63,38 @@ def update_conversation(
 
 
 @router.delete("/{conversation_id}", response_model=Resp[bool])
-def delete_conversation(
+async def delete_conversation(
     conversation_id: int,
     db: Session = Depends(get_db),
     req_ctx: RequestContext = Depends(build_request_context),
 ) -> Resp[bool]:
-    service.delete_conversation(db, conversation_id, req_ctx.user_id)
+    await service.delete_conversation(db, conversation_id, req_ctx.user_id)
     return Resp(data=True)
+
+
+@router.post("/{conversation_id}/reset", response_model=Resp[bool])
+async def reset_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> Resp[bool]:
+    """清空该会话的运行态（checkpoint），业务消息和反馈保留。"""
+    await service.reset_conversation(db, conversation_id, req_ctx.user_id, req_ctx)
+    return Resp(data=True)
+
+
+@router.post("/admin/purge", response_model=Resp[int])
+async def purge_expired_checkpoints(
+    ttl_days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    _: RequestContext = Depends(build_request_context),
+) -> Resp[int]:
+    """运维端点：扫描长时间未更新会话清理其 checkpoint，返回清理数。
+
+    暂用 update_time inactivity 作为触发条件，会话归档状态机落地后切换。
+    """
+    count = await service.purge_expired_checkpoints(db, ttl_days=ttl_days)
+    return Resp(data=count)
 
 
 @router.get(

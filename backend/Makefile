@@ -4,11 +4,12 @@ export UV_DEFAULT_INDEX
 UV_RUN := uv run
 APP := app
 
-.PHONY: py-dev code-format code-check db-upgrade db-revision db-downgrade db-current help
+.PHONY: py-dev dev code-format code-check db-upgrade db-revision db-downgrade db-current help
 
 help:
 	@echo "Targets:"
 	@echo "  py-dev         创建 Python 开发环境并安装所需依赖"
+	@echo "  dev            启动开发服务器(端口 8000,自动 reload)"
 	@echo "  code-format    ruff --fix(含 import 排序) + black"
 	@echo "  code-check     ruff + black --check(CI)"
 	@echo "  db-upgrade     应用所有未执行的 alembic 迁移(升级到 head)"
@@ -19,6 +20,9 @@ help:
 py-dev:
 	uv sync
 	@if [ ! -f .env ]; then cp .env.example .env; fi
+
+dev:
+	$(UV_RUN) python $(APP)/run.py
 
 code-format:
 	$(UV_RUN) ruff check --fix $(APP)

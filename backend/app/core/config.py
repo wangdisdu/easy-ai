@@ -1,10 +1,17 @@
+from pathlib import Path
+
 from langfuse import Langfuse
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# config.py 位于 backend/app/core/config.py，向上三级回到 backend/。
+# 用绝对路径锁死 .env 位置，避免 cwd 不同（CLI / PyCharm / pytest）找不到文件。
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+_ENV_FILE = _BACKEND_DIR / ".env"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=str(_ENV_FILE), env_file_encoding="utf-8")
 
     app_name: str = "easy-ai-backend"
     app_env: str = "dev"
@@ -23,6 +30,14 @@ class Settings(BaseSettings):
     langfuse_host: str = Field(default="http://localhost:3000")
     langfuse_public_key: str | None = Field(default=None)
     langfuse_secret_key: str | None = Field(default=None)
+
+    # Checkpoint purge 后台任务
+    purge_enabled: bool = Field(default=True)
+    purge_interval_seconds: int = Field(default=86400)  # 24h
+    purge_ttl_days: int = Field(default=30)
+
+    # 单次 MCP tool 调用最长等待秒数；超过强制切断，避免一个慢工具卡住整轮 agent。
+    mcp_tool_timeout_seconds: float = Field(default=300.0)
 
     # Flowise 嵌入接入（M1）
     flowise_enabled: bool = Field(default=False)

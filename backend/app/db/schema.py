@@ -192,6 +192,9 @@ class TbLlmModel(Base):
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     model_type: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 模型最大输入 token 数；缺省时摘要中间件会走 170k 兜底，
+    # 配上后按 fraction 触发（例如 32k 模型在 ~27k 时触发摘要）。
+    max_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -214,6 +217,8 @@ class TbApp(Base):
     access_scope: Mapped[str] = mapped_column(String(255), nullable=False)
     rate_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     enable_log: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 长会话总开关：0 关闭（兼容老行为，全量历史）；1 开启（走 Checkpointer，只传新消息）
+    enable_long_session: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     current_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Flowise chatflow uuid，仅 app_type=agent_flow 时写入
@@ -296,12 +301,17 @@ class TbAppLog(Base):
 
 class TbConversation(Base):
     __tablename__ = "tb_conversation"
+    __table_args__ = (UniqueConstraint("thread_id", name="uk_tb_conversation_thread_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     app_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    # LangGraph checkpoint 线程标识；首次真实调用时落地 str(id)，之后不变。
+    thread_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # active / degraded / purged，checkpoint 生命周期独立于业务消息。
+    checkpoint_status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -318,3 +328,15 @@ class TbConversationMessage(Base):
     metadata_: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbSessionAudit(Base):
+    """会话级审计事件（checkpoint 重建/清理等），为后续 Policy 层审计流预留。"""
+
+    __tablename__ = "tb_session_audit"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)

@@ -22,6 +22,16 @@
           </div>
           <div class="conv-title">{{ conv.title || "新对话" }}</div>
           <div v-if="conv.last_message" class="conv-preview">{{ conv.last_message }}</div>
+          <a-popconfirm
+            title="删除该会话？"
+            description="消息历史和运行态都会被清掉，无法恢复。"
+            ok-text="删除"
+            cancel-text="取消"
+            ok-type="danger"
+            @confirm="deleteConv(conv)"
+          >
+            <DeleteOutlined class="conv-item-delete" :title="'删除会话'" @click.stop />
+          </a-popconfirm>
         </div>
         <a-empty v-if="!conversations.length" :image="false" description="暂无对话" class="conv-empty" />
       </div>
@@ -212,6 +222,7 @@ import {
   RightOutlined,
   LeftOutlined,
   CheckOutlined,
+  DeleteOutlined,
 } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
 import { marked } from "marked";
@@ -282,6 +293,7 @@ const filteredApps = computed(() =>
     ? publishedApps.value.filter((a) => a.app_type === pickerType.value)
     : [],
 );
+
 
 // 展开状态独立管理（不放在 computed 内，避免重算时重置）
 const expandedTools = reactive<Set<string>>(new Set());
@@ -395,6 +407,21 @@ async function createNewChat() {
   messages.value = [];
 }
 
+async function deleteConv(conv: ConversationResp) {
+  try {
+    await convApi.deleteConversation(conv.id);
+    conversations.value = conversations.value.filter((c) => c.id !== conv.id);
+    // 删的就是当前会话，清掉主区状态
+    if (currentConversation.value?.id === conv.id) {
+      currentConversation.value = null;
+      messages.value = [];
+    }
+    message.success("会话已删除");
+  } catch (err) {
+    message.error("删除失败：" + (err instanceof Error ? err.message : String(err)));
+  }
+}
+
 async function selectApp(app: AppResp) {
   selectedApp.value = app;
   showAppPicker.value = false;
@@ -459,6 +486,12 @@ function sendMessage() {
         switch (evt.event) {
           case "metadata":
             streamMeta.model = (evt.data.model as string) || "";
+            if (evt.data.degraded) {
+              message.warning(
+                "历史已降级恢复：消息保留，但 agent 的待办、虚拟工作文件、工具中间态丢失",
+                6,
+              );
+            }
             break;
           case "token":
             streamingContent.value += (evt.data.content as string) || "";
@@ -577,6 +610,7 @@ onMounted(async () => {
 }
 
 .conv-item {
+  position: relative;
   padding: 10px 12px;
   border-radius: 10px;
   cursor: pointer;
@@ -588,6 +622,27 @@ onMounted(async () => {
 .conv-item:hover {
   background: rgba(226, 232, 240, 0.5);
   border-color: rgba(203, 213, 225, 0.9);
+}
+
+.conv-item-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px;
+  font-size: 14px;
+  color: #94a3b8;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.conv-item:hover .conv-item-delete {
+  opacity: 1;
+}
+
+.conv-item-delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
 }
 
 .conv-item--active {

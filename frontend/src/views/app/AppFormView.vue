@@ -394,6 +394,14 @@
                 <a-switch v-model:checked="formModel.enable_log" />
               </a-form-item>
             </a-col>
+            <a-col v-if="formModel.app_type === 'agent'" :xs="24" :md="8">
+              <a-form-item
+                label="启用长会话"
+                extra="开启后会话历史由 Checkpointer 跨轮持久化，第二轮起仅传新消息"
+              >
+                <a-switch v-model:checked="formModel.enable_long_session" />
+              </a-form-item>
+            </a-col>
           </a-row>
         </section>
 
@@ -527,6 +535,7 @@ const formModel = reactive({
   access_scope: "internal",
   rate_limit: 60,
   enable_log: true,
+  enable_long_session: false,
 });
 
 const modelSetting = reactive({
@@ -671,6 +680,7 @@ function fillFromApp(app: AppResp) {
   formModel.access_scope = app.access_scope || "internal";
   formModel.rate_limit = app.rate_limit ?? 60;
   formModel.enable_log = !!app.enable_log;
+  formModel.enable_long_session = !!app.enable_long_session;
   modelSetting.temperature = Number(app.model_setting?.temperature ?? 0.7);
   modelSetting.max_tokens = Number(app.model_setting?.max_tokens ?? 2048);
 
@@ -769,6 +779,7 @@ async function submitForm() {
       access_scope: formModel.access_scope,
       rate_limit: formModel.rate_limit,
       enable_log: formModel.enable_log,
+      enable_long_session: isAgent ? formModel.enable_long_session : undefined,
       tool_ids: isAgent ? agentBindings.tool_ids.slice() : undefined,
       skill_ids: isAgent ? agentBindings.skill_ids.slice() : undefined,
     };

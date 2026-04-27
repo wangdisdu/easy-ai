@@ -11,12 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.app.agent_app import AgentApp
 from app.app.app_runtime import AppRuntime
+from app.app.checkpointer_factory import get_checkpointer_factory
 from app.app.llm_app import LlmApp
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
-from app.db.schema import TbApp, TbConversation, TbConversationMessage
+from app.db.schema import TbApp, TbConversation, TbConversationMessage, TbSessionAudit
 from app.model.conversation_model import (
     ConversationCreateReq,
     ConversationMessageResp,
@@ -155,13 +156,120 @@ class ConversationService:
         app = db.get(TbApp, conv.app_id)
         return self._to_conversation_resp(conv, app)
 
-    def delete_conversation(self, db: Session, conversation_id: int, user_id: int) -> None:
+    async def delete_conversation(self, db: Session, conversation_id: int, user_id: int) -> None:
         conv = self._get_own_conversation(db, conversation_id, user_id)
+        thread_id = conv.thread_id
+        # 先删 checkpoint，再删业务行：checkpoint 删失败时整事务作废，避免出现
+        # "业务行没了 / checkpoint 残留无主"，purge 也无法回收。
+        if thread_id:
+            await self._delete_checkpoint_thread(thread_id)
         db.execute(
             delete(TbConversationMessage).where(TbConversationMessage.conversation_id == conv.id)
         )
+        db.execute(delete(TbSessionAudit).where(TbSessionAudit.conversation_id == conv.id))
         db.delete(conv)
         db.commit()
+
+    async def reset_conversation(
+        self,
+        db: Session,
+        conversation_id: int,
+        user_id: int,
+        req_ctx: RequestContext,
+    ) -> None:
+        """清运行态（checkpoint），保留业务消息和反馈。
+
+        重置后下一轮发消息会因 prior_count > 1 走降级重建——历史还在，
+        但 todos / 虚拟工作文件 / 工具中间态丢失。
+        """
+        conv = self._get_own_conversation(db, conversation_id, user_id)
+        thread_id = conv.thread_id
+        if not thread_id:
+            return
+        await self._delete_checkpoint_thread(thread_id)
+        conv.checkpoint_status = "active"
+        db.add(
+            TbSessionAudit(
+                id=self._id_generator.next_id(),
+                conversation_id=conversation_id,
+                event_type="checkpoint_reset",
+                payload=None,
+                create_time=req_ctx.request_time_ms,
+            )
+        )
+        db.commit()
+
+    async def purge_expired_checkpoints(
+        self,
+        db: Session,
+        ttl_days: int = 30,
+        *,
+        now_ms: int | None = None,
+    ) -> int:
+        """清理长时间未更新会话的 checkpoint，返回被清理 thread 数。
+
+        当前以 `update_time` 不活跃为代理条件；待会话归档状态机落地后改成
+        archived + ttl_days 触发（见 long-session-design 后续 PR）。
+        """
+        current_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+        cutoff_ms = current_ms - ttl_days * 86_400_000
+        rows = db.scalars(
+            select(TbConversation).where(
+                TbConversation.update_time < cutoff_ms,
+                TbConversation.thread_id.is_not(None),
+                TbConversation.checkpoint_status != "purged",
+            )
+        ).all()
+        purged = 0
+        for conv in rows:
+            try:
+                await self._delete_checkpoint_thread(conv.thread_id)
+            except Exception:
+                logger.exception("purge: failed to delete checkpoint thread %s", conv.thread_id)
+                continue
+            conv.checkpoint_status = "purged"
+            db.add(
+                TbSessionAudit(
+                    id=self._id_generator.next_id(),
+                    conversation_id=conv.id,
+                    event_type="checkpoint_purged",
+                    payload=json.dumps({"thread_id": conv.thread_id}),
+                    create_time=current_ms,
+                )
+            )
+            purged += 1
+        if purged > 0:
+            db.commit()
+        return purged
+
+    async def cascade_delete_user_checkpoints(self, db: Session, user_id: int) -> int:
+        """被遗忘权 / 用户删除时调用：清掉该用户所有会话的 checkpoint。
+
+        只删 checkpoint 不删业务消息，业务侧的级联由调用方决定。
+        返回被清理 thread 数。
+        """
+        thread_ids = [
+            tid
+            for tid in db.scalars(
+                select(TbConversation.thread_id).where(
+                    TbConversation.user_id == user_id,
+                    TbConversation.thread_id.is_not(None),
+                )
+            ).all()
+            if tid
+        ]
+        deleted = 0
+        for tid in thread_ids:
+            try:
+                await self._delete_checkpoint_thread(tid)
+                deleted += 1
+            except Exception:
+                logger.exception("rtb-forgotten: failed to delete thread %s", tid)
+        return deleted
+
+    async def _delete_checkpoint_thread(self, thread_id: str) -> None:
+        saver = get_checkpointer_factory().get()
+        await saver.adelete_thread(thread_id)
 
     def list_messages(
         self, db: Session, conversation_id: int, user_id: int
@@ -195,6 +303,12 @@ class ConversationService:
 
         now = req_ctx.request_time_ms
 
+        # 长会话仅对 agent 类型生效；命中后由 LangGraph Checkpointer 持久化运行态。
+        long_session_active = bool(app.app_type == "agent" and app.enable_long_session)
+        if long_session_active and not conv.thread_id:
+            # 首次调用落地 thread_id（与 conversation id 同字面量），之后永不变。
+            conv.thread_id = str(conv.id)
+
         # 保存用户消息
         user_msg = TbConversationMessage(
             id=self._id_generator.next_id(),
@@ -224,24 +338,64 @@ class ConversationService:
         conv.update_user = req_ctx.user_id
         db.commit()
 
-        # 加载历史消息构建上下文
-        history_rows = db.scalars(
-            select(TbConversationMessage)
-            .where(
-                TbConversationMessage.conversation_id == conversation_id,
-                TbConversationMessage.role.in_(["user", "assistant"]),
-            )
-            .order_by(TbConversationMessage.create_time)
-        ).all()
+        # 决定本轮的消息输入协议：
+        #   - 长会话关：沿用全量历史
+        #   - 长会话开 + checkpoint 命中：只传新这一句，历史由 saver 恢复
+        #   - 长会话开 + checkpoint 缺失但已有历史：降级重建，写 audit
+        #   - 长会话开 + 首次调用：只传新这一句（checkpoint 从此生成）
+        thread_id_for_call: str | None = None
+        use_checkpoint_for_call = False
+        degraded_for_call = False
 
-        # 限制上下文窗口
-        if len(history_rows) > MAX_CONTEXT_TURNS * 2:
-            history_rows = history_rows[-(MAX_CONTEXT_TURNS * 2) :]
+        if long_session_active:
+            thread_id_for_call = conv.thread_id
+            saver = get_checkpointer_factory().get()
+            ckpt = await saver.aget_tuple({"configurable": {"thread_id": thread_id_for_call}})
 
-        messages = [
-            ModelGatewayChatMessage(role=msg.role, content=msg.content or "")
-            for msg in history_rows
-        ]
+            if ckpt is not None:
+                # 正常路径：只传本轮新消息
+                messages = [ModelGatewayChatMessage(role="user", content=content)]
+            else:
+                # checkpoint 缺失。区分"首次调用"与"被清理后真正降级"：
+                # 用刚保存完后 tb_conversation_message 中 user/assistant 的总数判断，
+                # 1 条说明只有这条新写入的 user_msg，是首次。
+                prior_count = (
+                    db.scalar(
+                        select(func.count())
+                        .select_from(TbConversationMessage)
+                        .where(
+                            TbConversationMessage.conversation_id == conversation_id,
+                            TbConversationMessage.role.in_(["user", "assistant"]),
+                        )
+                    )
+                    or 0
+                )
+                if prior_count <= 1:
+                    messages = [ModelGatewayChatMessage(role="user", content=content)]
+                else:
+                    history_rows = self._load_history_rows(db, conversation_id)
+                    messages = [
+                        ModelGatewayChatMessage(role=m.role, content=m.content or "")
+                        for m in history_rows
+                    ]
+                    degraded_for_call = True
+                    conv.checkpoint_status = "degraded"
+                    db.add(
+                        TbSessionAudit(
+                            id=self._id_generator.next_id(),
+                            conversation_id=conversation_id,
+                            event_type="checkpoint_rebuilt_from_messages",
+                            payload=json.dumps({"history_count": len(history_rows)}),
+                            create_time=now,
+                        )
+                    )
+                    db.commit()
+            use_checkpoint_for_call = True
+        else:
+            history_rows = self._load_history_rows(db, conversation_id)
+            messages = [
+                ModelGatewayChatMessage(role=m.role, content=m.content or "") for m in history_rows
+            ]
 
         # 准备完毕，关闭 session
         app_id = app.id
@@ -258,7 +412,13 @@ class ConversationService:
                 request_type="chat",
             )
         else:
-            agent_req = AgentRunRequest(app_id=app_id, messages=messages)
+            agent_req = AgentRunRequest(
+                app_id=app_id,
+                messages=messages,
+                thread_id=thread_id_for_call,
+                use_checkpoint=use_checkpoint_for_call,
+                degraded=degraded_for_call,
+            )
             inner_gen = self._agent_app.stream(
                 db=SessionLocal(),
                 req=agent_req,
@@ -395,6 +555,20 @@ class ConversationService:
         if conv.user_id != user_id:
             raise ServiceError(ErrorCode.BAD_REQUEST, "conversation not owned by user")
         return conv
+
+    def _load_history_rows(self, db: Session, conversation_id: int) -> list[TbConversationMessage]:
+        """读取对话的 user/assistant 历史消息，按时间序，受 MAX_CONTEXT_TURNS 限制。"""
+        rows = db.scalars(
+            select(TbConversationMessage)
+            .where(
+                TbConversationMessage.conversation_id == conversation_id,
+                TbConversationMessage.role.in_(["user", "assistant"]),
+            )
+            .order_by(TbConversationMessage.create_time)
+        ).all()
+        if len(rows) > MAX_CONTEXT_TURNS * 2:
+            rows = rows[-(MAX_CONTEXT_TURNS * 2) :]
+        return list(rows)
 
     def _to_conversation_resp(self, conv: TbConversation, app: TbApp | None) -> ConversationResp:
         return ConversationResp(

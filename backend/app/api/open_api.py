@@ -31,23 +31,25 @@ rag_app = RagApp(app_runtime=app_runtime)
 
 
 @router.post("/{app_id}", response_model=Resp[dict[str, Any]])
-def run_app(
+async def run_app(
     app_id: int,
     req: AppRunReq,
     db: Session = Depends(get_db),
     req_ctx: RequestContext = Depends(build_request_context),
 ) -> Resp[dict[str, Any]]:
-    return Resp(data=_dispatch(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=False))
+    data = await _dispatch(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=False)
+    return Resp(data=data)
 
 
 @router.post("/{app_id}/test", response_model=Resp[dict[str, Any]])
-def test_app(
+async def test_app(
     app_id: int,
     req: AppTestReq,
     db: Session = Depends(get_db),
     req_ctx: RequestContext = Depends(build_request_context),
 ) -> Resp[dict[str, Any]]:
-    return Resp(data=_dispatch(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=True))
+    data = await _dispatch(db=db, app_id=app_id, req=req, req_ctx=req_ctx, is_test=True)
+    return Resp(data=data)
 
 
 @router.post("/{app_id}/stream")
@@ -109,7 +111,7 @@ def _dispatch_stream(
     )
 
 
-def _dispatch(
+async def _dispatch(
     *,
     db: Session,
     app_id: int,
@@ -127,7 +129,7 @@ def _dispatch(
 
     if app.app_type == "agent":
         agent_req = AgentRunRequest(app_id=app_id, messages=req.messages, variables=req.variables)
-        return agent_app.run(db=db, req=agent_req, req_ctx=req_ctx, request_type=request_type)
+        return await agent_app.run(db=db, req=agent_req, req_ctx=req_ctx, request_type=request_type)
 
     if app.app_type == "rag":
         query = _resolve_query(req)
