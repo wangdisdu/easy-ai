@@ -39,6 +39,7 @@
 
     <!-- 对话主区 -->
     <main class="chat-main">
+      <div class="chat-content">
       <!-- 顶部栏 -->
       <div class="chat-topbar">
         <div class="chat-app-selector" @click.stop>
@@ -210,6 +211,8 @@
         </div>
         <div class="chat-input-hint">Enter 发送 · Shift+Enter 换行 · 内容由 AI 生成，请注意甄别</div>
       </div>
+      </div>
+      <TodoPanel v-if="showTodoPanel" :todos="todos" />
     </main>
   </div>
 </template>
@@ -230,6 +233,7 @@ import * as convApi from "@/api/conversation";
 import * as appApi from "@/api/app";
 import type { AppResp, ConversationResp, ConversationMessageResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
+import TodoPanel, { type Todo } from "@/components/TodoPanel.vue";
 
 // ── 状态 ──
 
@@ -293,6 +297,25 @@ const filteredApps = computed(() =>
     ? publishedApps.value.filter((a) => a.app_type === pickerType.value)
     : [],
 );
+
+// Todo 实时面板：仅 agent 应用 + 当前会话有 todos 时显示
+const todos = ref<Todo[]>([]);
+const showTodoPanel = computed(
+  () => selectedApp.value?.app_type === "agent" && todos.value.length > 0,
+);
+
+// write_todos 一轮内可能多次刷，用 RAF 合并到下一帧避免抖动
+let pendingTodos: Todo[] | null = null;
+let todoRaf: number | null = null;
+function applyTodoUpdate(next: Todo[]) {
+  pendingTodos = next;
+  if (todoRaf !== null) return;
+  todoRaf = requestAnimationFrame(() => {
+    if (pendingTodos !== null) todos.value = pendingTodos;
+    pendingTodos = null;
+    todoRaf = null;
+  });
+}
 
 
 // 展开状态独立管理（不放在 computed 内，避免重算时重置）
@@ -386,6 +409,8 @@ async function loadApps() {
 
 async function selectConversation(conv: ConversationResp) {
   currentConversation.value = conv;
+  // 切会话清空 todos：发消息时由 SSE 初始快照恢复（若 checkpoint 有）
+  todos.value = [];
   // 同步应用
   const app = publishedApps.value.find((a) => a.id === conv.app_id);
   if (app) selectedApp.value = app;
@@ -405,6 +430,7 @@ async function createNewChat() {
   conversations.value.unshift(conv);
   currentConversation.value = conv;
   messages.value = [];
+  todos.value = [];
 }
 
 async function deleteConv(conv: ConversationResp) {
@@ -415,6 +441,7 @@ async function deleteConv(conv: ConversationResp) {
     if (currentConversation.value?.id === conv.id) {
       currentConversation.value = null;
       messages.value = [];
+      todos.value = [];
     }
     message.success("会话已删除");
   } catch (err) {
@@ -492,6 +519,9 @@ function sendMessage() {
                 6,
               );
             }
+            break;
+          case "todo_update":
+            applyTodoUpdate((evt.data.todos as Todo[]) || []);
             break;
           case "token":
             streamingContent.value += (evt.data.content as string) || "";
@@ -714,6 +744,13 @@ onMounted(async () => {
 
 /* ── 对话主区 ── */
 .chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+}
+
+.chat-content {
   flex: 1;
   display: flex;
   flex-direction: column;

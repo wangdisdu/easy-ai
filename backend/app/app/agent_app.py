@@ -29,6 +29,7 @@ from app.core.sse import (
     SSE_EVENT_ERROR,
     SSE_EVENT_MESSAGE_COMPLETE,
     SSE_EVENT_METADATA,
+    SSE_EVENT_TODO_UPDATE,
     SSE_EVENT_TOKEN,
     SSE_EVENT_TOOL_CALL_END,
     SSE_EVENT_TOOL_CALL_START,
@@ -41,6 +42,27 @@ from app.service.app_log_service import ZERO_USAGE, AppLogService
 from app.service.skill_service import RESERVED_SKILL_NAMES
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_todos(todos: Any) -> list[dict[str, str]]:
+    """把 LangChain Todo TypedDict 列表归一化成纯 JSON。
+
+    输入可能是 list[TypedDict]、list[dict]、None；输出统一为 list[dict] 含
+    content + status 两个 string 字段，方便 SSE 序列化和前端渲染。
+    """
+    out: list[dict[str, str]] = []
+    if not isinstance(todos, list):
+        return out
+    for t in todos:
+        if not isinstance(t, dict):
+            continue
+        out.append(
+            {
+                "content": str(t.get("content") or ""),
+                "status": str(t.get("status") or "pending"),
+            }
+        )
+    return out
 
 
 def _describe_exception(exc: BaseException) -> str:
@@ -197,6 +219,24 @@ class AgentApp:
             metadata_event["degraded"] = True
         yield format_sse_event(SSE_EVENT_METADATA, metadata_event)
 
+        # 初始 todos 快照：用户重新打开会话发消息时，先把 checkpoint 里已有的
+        # todos 推一次，避免 panel 留白等下一次 write_todos。
+        if prep.use_checkpoint and prep.thread_id:
+            try:
+                saver = self._checkpointer_factory.get()
+                ckpt = await saver.aget_tuple({"configurable": {"thread_id": prep.thread_id}})
+                if ckpt is not None:
+                    existing = ckpt.checkpoint.get("channel_values", {}).get("todos")
+                    serialized = _serialize_todos(existing)
+                    if serialized:
+                        yield format_sse_event(SSE_EVENT_TODO_UPDATE, {"todos": serialized})
+            except Exception:
+                logger.warning(
+                    "failed to load initial todos snapshot for thread %s",
+                    prep.thread_id,
+                    exc_info=True,
+                )
+
         # 卡顿诊断：跟踪 LLM 调用 / 工具调用的起止 timing。
         # 出问题时 tail log，"X_start 没有对应 X_end"那条就是卡的位置。
         chat_model_started_at: float | None = None
@@ -277,6 +317,17 @@ class AgentApp:
                                 "status": "success",
                             },
                         )
+                        # write_todos 工具的入参就是新的 todos 全量快照，
+                        # 借这个事件推一条 todo_update 给前端，不用额外读 state。
+                        if tool_name == "write_todos":
+                            tool_input = data.get("input") or {}
+                            new_todos = (
+                                tool_input.get("todos") if isinstance(tool_input, dict) else None
+                            )
+                            yield format_sse_event(
+                                SSE_EVENT_TODO_UPDATE,
+                                {"todos": _serialize_todos(new_todos)},
+                            )
 
                     elif kind == "on_tool_error":
                         run_id = event.get("run_id", "")
