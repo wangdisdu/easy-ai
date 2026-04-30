@@ -37,3 +37,10 @@ class ConversationMessageResp(BaseModel):
 
 class SendMessageReq(BaseModel):
     content: str = Field(min_length=1)
+
+
+class HitlResponseReq(BaseModel):
+    """HITL 用户响应：confirm 按原参数执行；modify 用 parameters 覆盖；reject 取消。"""
+
+    action: str = Field(pattern="^(confirm|modify|reject)$")
+    parameters: dict[str, Any] | None = None

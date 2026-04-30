@@ -53,3 +53,28 @@ export function sendMessageStream(
   });
   return { abort: () => controller.abort() };
 }
+
+export type HitlAction = "confirm" | "modify" | "reject";
+
+export interface HitlResponseBody {
+  action: HitlAction;
+  parameters?: Record<string, unknown>;
+}
+
+export function respondHitlStream(
+  conversationId: string,
+  hitlId: string,
+  body: HitlResponseBody,
+  options: Omit<SSEOptions, "signal">,
+): { abort: () => void } {
+  const controller = new AbortController();
+  fetchSSE(
+    `/api/v1/conversation/${conversationId}/hitl/${hitlId}/respond`,
+    body as unknown as Record<string, unknown>,
+    { ...options, signal: controller.signal },
+  ).catch((err: unknown) => {
+    if (err instanceof Error && err.name === "AbortError") return;
+    options.onError?.(err instanceof Error ? err : new Error(String(err)));
+  });
+  return { abort: () => controller.abort() };
+}

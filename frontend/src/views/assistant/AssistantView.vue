@@ -148,7 +148,7 @@
         </template>
 
         <!-- 流式 AI 回复（工具 + 文本合并为一个气泡） -->
-        <div v-if="isStreaming || streamingContent || streamingToolCalls.length" class="chat-msg chat-msg--assistant">
+        <div v-if="isStreaming || streamingContent || streamingToolCalls.length || pendingHitl" class="chat-msg chat-msg--assistant">
           <div class="chat-avatar">AI</div>
           <div class="chat-bubble-wrap">
             <div class="chat-bubble chat-bubble--ai">
@@ -176,9 +176,16 @@
               <!-- 流式文本 -->
               <div v-if="streamingContent" class="msg-content" v-html="renderMarkdown(streamingContent + '▍')"></div>
               <!-- 处理中指示器：只要仍在流式且没有文本内容，就显示思考动画 -->
-              <div v-if="isStreaming && !streamingContent" class="chat-thinking">
+              <div v-if="isStreaming && !streamingContent && !pendingHitl" class="chat-thinking">
                 <span class="dot" /><span class="dot" /><span class="dot" />
               </div>
+              <!-- HITL 用户确认卡片 -->
+              <HitlConfirmCard
+                v-if="pendingHitl"
+                :payload="pendingHitl"
+                :busy="hitlBusy"
+                @respond="onHitlRespond"
+              />
             </div>
           </div>
         </div>
@@ -234,6 +241,8 @@ import * as appApi from "@/api/app";
 import type { AppResp, ConversationResp, ConversationMessageResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
 import TodoPanel, { type Todo } from "@/components/TodoPanel.vue";
+import HitlConfirmCard, { type HitlPayload } from "@/components/HitlConfirmCard.vue";
+import type { HitlAction } from "@/api/conversation";
 
 // ── 状态 ──
 
@@ -266,6 +275,9 @@ const isStreaming = ref(false);
 const streamingContent = ref("");
 const streamingToolCalls = ref<StreamingToolCall[]>([]);
 const streamAbort = ref<{ abort: () => void } | null>(null);
+// 待响应的 HITL 暂停（一次最多挂一个；后续工具调用会接着触发新的）
+const pendingHitl = ref<HitlPayload | null>(null);
+const hitlBusy = ref(false);
 const streamMeta = reactive<{ model: string; sources: string[]; usage: Record<string, unknown> | null; latency_ms: number | null }>({
   model: "",
   sources: [],
@@ -411,6 +423,9 @@ async function selectConversation(conv: ConversationResp) {
   currentConversation.value = conv;
   // 切会话清空 todos：发消息时由 SSE 初始快照恢复（若 checkpoint 有）
   todos.value = [];
+  // 切会话也丢弃旧的 HITL 暂停（resume 必须配同一会话）
+  pendingHitl.value = null;
+  hitlBusy.value = false;
   // 同步应用
   const app = publishedApps.value.find((a) => a.id === conv.app_id);
   if (app) selectedApp.value = app;
@@ -500,6 +515,8 @@ function sendMessage() {
   isStreaming.value = true;
   streamingContent.value = "";
   streamingToolCalls.value = [];
+  pendingHitl.value = null;
+  hitlBusy.value = false;
   streamMeta.model = "";
   streamMeta.sources = [];
   streamMeta.usage = null;
@@ -508,74 +525,107 @@ function sendMessage() {
   streamAbort.value = convApi.sendMessageStream(
     currentConversation.value.id,
     { content: text },
-    {
-      onEvent(evt: SSEEvent) {
-        switch (evt.event) {
-          case "metadata":
-            streamMeta.model = (evt.data.model as string) || "";
-            if (evt.data.degraded) {
-              message.warning(
-                "历史已降级恢复：消息保留，但 agent 的待办、虚拟工作文件、工具中间态丢失",
-                6,
-              );
-            }
-            break;
-          case "todo_update":
-            applyTodoUpdate((evt.data.todos as Todo[]) || []);
-            break;
-          case "token":
-            streamingContent.value += (evt.data.content as string) || "";
-            scrollToBottom();
-            break;
-          case "tool_call_start":
-            streamingToolCalls.value.push({
-              tool_call_id: (evt.data.tool_call_id as string) || "",
-              name: (evt.data.name as string) || "",
-              status: "running",
-              arguments: evt.data.arguments as Record<string, unknown> | undefined,
-            });
-            scrollToBottom();
-            break;
-          case "tool_call_end": {
-            const id = evt.data.tool_call_id as string;
-            const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
-            if (tc) {
-              tc.status = (evt.data.status as string) === "error" ? "error" : "success";
-              tc.result = (evt.data.result as string) || "";
-            }
-            break;
-          }
-          case "message_complete":
-            streamMeta.usage = (evt.data.usage as Record<string, unknown>) ?? null;
-            streamMeta.sources = (evt.data.sources as string[]) ?? [];
-            break;
-          case "done":
-            streamMeta.latency_ms = (evt.data.latency_ms as number) ?? null;
-            break;
-          case "error":
-            message.error((evt.data.message as string) || "执行出错");
-            break;
-        }
-      },
-      onDone() {
-        isStreaming.value = false;
-        streamingContent.value = "";
-        streamingToolCalls.value = [];
+    buildStreamHandlers(),
+  );
+}
 
-        // 从后端重新加载完整消息列表（包含工具调用记录）
-        if (currentConversation.value) {
-          convApi.listMessages(currentConversation.value.id).then(({ data }) => {
-            messages.value = data.data ?? [];
-            scrollToBottom();
+function buildStreamHandlers() {
+  // 共享 SSE 事件处理：sendMessage 和 HITL resume 都接到同一管线，
+  // 前端状态机可以在两个流里继续累积 token / tool_calls。
+  return {
+    onEvent(evt: SSEEvent) {
+      switch (evt.event) {
+        case "metadata":
+          if (!streamMeta.model) streamMeta.model = (evt.data.model as string) || "";
+          if (evt.data.degraded) {
+            message.warning(
+              "历史已降级恢复：消息保留，但 agent 的待办、虚拟工作文件、工具中间态丢失",
+              6,
+            );
+          }
+          break;
+        case "todo_update":
+          applyTodoUpdate((evt.data.todos as Todo[]) || []);
+          break;
+        case "token":
+          streamingContent.value += (evt.data.content as string) || "";
+          scrollToBottom();
+          break;
+        case "tool_call_start":
+          streamingToolCalls.value.push({
+            tool_call_id: (evt.data.tool_call_id as string) || "",
+            name: (evt.data.name as string) || "",
+            status: "running",
+            arguments: evt.data.arguments as Record<string, unknown> | undefined,
           });
+          scrollToBottom();
+          break;
+        case "tool_call_end": {
+          const id = evt.data.tool_call_id as string;
+          const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
+          if (tc) {
+            tc.status = (evt.data.status as string) === "error" ? "error" : "success";
+            tc.result = (evt.data.result as string) || "";
+          }
+          break;
         }
-        loadConversations();
-      },
-      onError(err: Error) {
-        message.error(err.message || "请求失败");
-        isStreaming.value = false;
-      },
+        case "tool_hitl_required":
+          pendingHitl.value = evt.data as unknown as HitlPayload;
+          scrollToBottom();
+          break;
+        case "message_complete":
+          streamMeta.usage = (evt.data.usage as Record<string, unknown>) ?? null;
+          streamMeta.sources = (evt.data.sources as string[]) ?? [];
+          break;
+        case "done":
+          streamMeta.latency_ms = (evt.data.latency_ms as number) ?? null;
+          break;
+        case "error":
+          message.error((evt.data.message as string) || "执行出错");
+          break;
+      }
     },
+    onDone() {
+      hitlBusy.value = false;
+      // 暂停在 interrupt 上：保留 isStreaming=true 让输入框继续禁用，等用户响应卡片
+      if (pendingHitl.value) {
+        return;
+      }
+      isStreaming.value = false;
+      streamingContent.value = "";
+      streamingToolCalls.value = [];
+
+      if (currentConversation.value) {
+        convApi.listMessages(currentConversation.value.id).then(({ data }) => {
+          messages.value = data.data ?? [];
+          scrollToBottom();
+        });
+      }
+      loadConversations();
+    },
+    onError(err: Error) {
+      message.error(err.message || "请求失败");
+      isStreaming.value = false;
+      hitlBusy.value = false;
+    },
+  };
+}
+
+function onHitlRespond(action: HitlAction, parameters?: Record<string, unknown>) {
+  if (!currentConversation.value || !pendingHitl.value) return;
+  if (hitlBusy.value) return;
+  hitlBusy.value = true;
+  isStreaming.value = true;
+  const hitlId = pendingHitl.value.hitl_id;
+  // 清掉卡片，等续跑流自然把 tool_call_end / token / 新的 hitl_required 推回来
+  pendingHitl.value = null;
+  const body: convApi.HitlResponseBody = { action };
+  if (action === "modify" && parameters) body.parameters = parameters;
+  streamAbort.value = convApi.respondHitlStream(
+    currentConversation.value.id,
+    hitlId,
+    body,
+    buildStreamHandlers(),
   );
 }
 
@@ -583,6 +633,8 @@ function stopStream() {
   streamAbort.value?.abort();
   streamAbort.value = null;
   isStreaming.value = false;
+  pendingHitl.value = null;
+  hitlBusy.value = false;
 }
 
 // ── v-click-outside 指令 ──

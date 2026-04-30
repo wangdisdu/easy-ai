@@ -250,7 +250,7 @@ function applyTodoUpdate(next: Todo[]) {
 
 | 现有功能 | 影响 |
 |---|---|
-| `enable_long_session=0` | 流启动时无 checkpoint → 不发初始快照；流期间仍正常推 todo_update；流结束后下次回来 panel 空（合理） |
+| `use_checkpoint=False` 一次性调用 | 流启动时无 checkpoint → 不发初始快照；流期间仍正常推 todo_update；流结束后下次回来 panel 空（合理） |
 | 降级路径（checkpoint 缺失 + 业务消息）| 业务消息没存 todos，初始快照不发；agent 后续若调 write_todos 重建 |
 | reset / delete 会话 | checkpoint 删 → 下次 panel 空，符合预期 |
 | 技能 subagent 调 write_todos | 子代理 state 独立，主 state.todos 不受影响——主 panel 不会刷新；初版接受 |

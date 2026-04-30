@@ -64,7 +64,6 @@ export interface AppResp {
   access_scope?: string | null;
   rate_limit?: number | null;
   enable_log?: boolean | null;
-  enable_long_session?: boolean | null;
   version_id?: string | null;
   current_version?: string | null;
   flowise_chatflow_id?: string | null;
@@ -295,4 +294,63 @@ export interface ConversationMessageResp {
   content?: string | null;
   metadata?: Record<string, unknown> | null;
   create_time: number;
+}
+
+// ── 工具治理策略 ──
+
+export type PolicyAction = "allow" | "deny" | "require_hitl";
+export type PolicyMode = "active" | "shadow";
+
+// AST 节点类型与 backend §5.1 对齐；v1 表单只生成 Compare 节点
+export interface CompareNode {
+  type: "Compare";
+  op: string;
+  var: string;
+  value: unknown;
+}
+
+export interface AndNode {
+  type: "And";
+  conditions: WhenNode[];
+}
+
+export type WhenNode = CompareNode | AndNode;
+
+export interface PolicyRuleReq {
+  priority: number;
+  action: PolicyAction;
+  when_ast: WhenNode;
+  reason?: string | null;
+}
+
+export interface PolicyRuleResp {
+  id: string;
+  priority: number;
+  action: PolicyAction;
+  when_ast: WhenNode;
+  reason?: string | null;
+}
+
+export interface PolicyResp {
+  tool_id: string;
+  mode: PolicyMode;
+  version: number;
+  rules: PolicyRuleResp[];
+}
+
+export interface PolicyUpdateReq {
+  mode: PolicyMode;
+  rules: PolicyRuleReq[];
+}
+
+export interface PolicyContextVariable {
+  name: string;
+  kind: string;
+  label: string;
+}
+
+export interface PolicyOptionsResp {
+  actions: PolicyAction[];
+  operators_by_kind: Record<string, string[]>;
+  context_variables: PolicyContextVariable[];
 }

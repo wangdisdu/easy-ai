@@ -23,6 +23,7 @@ from app.model.conversation_model import (
     ConversationMessageResp,
     ConversationResp,
     ConversationUpdateReq,
+    HitlResponseReq,
 )
 from app.model.open_model import AgentRunRequest, LlmAppRunReq, ModelGatewayChatMessage
 
@@ -303,8 +304,8 @@ class ConversationService:
 
         now = req_ctx.request_time_ms
 
-        # 长会话仅对 agent 类型生效；命中后由 LangGraph Checkpointer 持久化运行态。
-        long_session_active = bool(app.app_type == "agent" and app.enable_long_session)
+        # 长会话对所有 agent app 默认开启，由 LangGraph Checkpointer 持久化运行态。
+        long_session_active = app.app_type == "agent"
         if long_session_active and not conv.thread_id:
             # 首次调用落地 thread_id（与 conversation id 同字面量），之后永不变。
             conv.thread_id = str(conv.id)
@@ -426,14 +427,81 @@ class ConversationService:
                 request_type="chat",
             )
 
-        # 透传 SSE 事件，同时收集完整回复和工具调用
+        async for chunk in self._consume_and_save_stream(inner_gen, conversation_id):
+            yield chunk
+
+    async def respond_hitl_stream(
+        self,
+        db: Session,
+        conversation_id: int,
+        hitl_id: str,
+        req: HitlResponseReq,
+        req_ctx: RequestContext,
+    ) -> AsyncGenerator[str, None]:
+        """HITL 用户响应到达后续跑被 interrupt() 暂停的 agent。
+
+        - 校验会话归属、应用类型为 agent
+        - 通过 LangGraph 状态校验目标 hitl_id 存在 pending interrupt
+        - 调 AgentApp.resume_stream() 透传 SSE
+        - 续跑产生的 assistant 文本与工具消息照常入库
+        """
+        from app.db.session import SessionLocal
+
+        conv = self._get_own_conversation(db, conversation_id, req_ctx.user_id)
+        app = self._app_runtime.get_app(db, conv.app_id)
+        if app.app_type != "agent":
+            raise ServiceError(
+                ErrorCode.BAD_REQUEST,
+                "hitl resume is only supported for agent apps",
+            )
+        thread_id = conv.thread_id
+        if not thread_id:
+            raise ServiceError(ErrorCode.BAD_REQUEST, "conversation has no active thread")
+
+        saver = get_checkpointer_factory().get()
+        ckpt = await saver.aget_tuple({"configurable": {"thread_id": thread_id}})
+        if ckpt is None:
+            raise ServiceError(ErrorCode.BAD_REQUEST, "no checkpoint to resume from")
+
+        app_id = app.id
+        db.close()
+
+        agent_req = AgentRunRequest(
+            app_id=app_id,
+            messages=[],
+            thread_id=thread_id,
+            use_checkpoint=True,
+            degraded=False,
+        )
+        hitl_response: dict[str, Any] = {"action": req.action}
+        if req.action == "modify" and isinstance(req.parameters, dict):
+            hitl_response["parameters"] = req.parameters
+
+        inner_gen = self._agent_app.resume_stream(
+            db=SessionLocal(),
+            req=agent_req,
+            req_ctx=req_ctx,
+            hitl_response=hitl_response,
+            request_type="chat",
+        )
+
+        async for chunk in self._consume_and_save_stream(inner_gen, conversation_id):
+            yield chunk
+
+    async def _consume_and_save_stream(
+        self,
+        inner_gen: AsyncGenerator[str, None],
+        conversation_id: int,
+    ) -> AsyncGenerator[str, None]:
+        """透传 SSE 同时收集 token / 工具调用 / 元数据；在末尾把 assistant + tool 消息持久化。"""
+        from app.db.session import SessionLocal
+
         full_content = ""
         tool_calls: list[dict[str, Any]] = []
         metadata_extra: dict[str, Any] = {}
 
         try:
             async for chunk in inner_gen:
-                # 解析事件以收集内容
                 if chunk.startswith("event: token\n"):
                     try:
                         data_line = chunk.split("data: ", 1)[1].split("\n")[0]
@@ -487,13 +555,11 @@ class ConversationService:
                 yield chunk
 
         finally:
-            # 保存工具调用消息 + AI 回复消息
             if full_content or tool_calls:
                 log_db = SessionLocal()
                 try:
                     now_ms = int(time.time() * 1000)
 
-                    # 先保存工具调用消息
                     for tc in tool_calls:
                         tool_msg = TbConversationMessage(
                             id=self._id_generator.next_id(),
@@ -514,7 +580,6 @@ class ConversationService:
                         )
                         log_db.add(tool_msg)
 
-                    # 保存 AI 回复消息
                     if full_content:
                         ai_msg = TbConversationMessage(
                             id=self._id_generator.next_id(),
@@ -531,7 +596,6 @@ class ConversationService:
                         )
                         log_db.add(ai_msg)
 
-                    # 更新会话时间
                     db_conv = log_db.get(TbConversation, conversation_id)
                     if db_conv:
                         db_conv.update_time = now_ms

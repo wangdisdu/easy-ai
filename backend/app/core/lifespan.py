@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.app.checkpoint_purger import CheckpointPurger
 from app.app.checkpointer_factory import get_checkpointer_factory
+from app.app.hitl_timeout_worker import HitlTimeoutWorker
 from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
 
@@ -31,9 +32,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         )
         await purger.start()
 
+    hitl_worker = HitlTimeoutWorker(
+        interval_seconds=settings.hitl_timeout_check_interval_seconds,
+        default_timeout_seconds=settings.hitl_timeout_seconds,
+    )
+    await hitl_worker.start()
+
     try:
         yield
     finally:
+        await hitl_worker.stop()
         if purger is not None:
             await purger.stop()
         await factory.close()

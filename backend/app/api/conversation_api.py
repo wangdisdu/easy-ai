@@ -13,6 +13,7 @@ from app.model.conversation_model import (
     ConversationMessageResp,
     ConversationResp,
     ConversationUpdateReq,
+    HitlResponseReq,
     SendMessageReq,
 )
 from app.service.conversation_service import ConversationService
@@ -118,6 +119,27 @@ async def send_message_stream(
     db = SessionLocal()
     try:
         generator = service.send_message_stream(db, conversation_id, req.content, req_ctx)
+    except Exception:
+        db.close()
+        raise
+    return sse_response(generator)
+
+
+@router.post("/{conversation_id}/hitl/{hitl_id}/respond")
+async def respond_hitl(
+    conversation_id: int,
+    hitl_id: str,
+    req: HitlResponseReq,
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> StreamingResponse:
+    """对 PolicyMiddleware 触发的 HITL interrupt 提交用户响应并续跑 agent。
+
+    body: {"action": "confirm"|"modify"|"reject", "parameters": {...}?}
+    返回 SSE 流，与 send_message_stream 形态一致。
+    """
+    db = SessionLocal()
+    try:
+        generator = service.respond_hitl_stream(db, conversation_id, hitl_id, req, req_ctx)
     except Exception:
         db.close()
         raise

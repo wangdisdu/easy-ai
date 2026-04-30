@@ -11,6 +11,7 @@ import httpx
 from deepagents import create_deep_agent
 from langfuse import propagate_attributes
 from langfuse.langchain import CallbackHandler
+from langgraph.types import Command
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,7 @@ from app.app.app_runtime import AppRuntime
 from app.app.backend_factory import BackendFactory
 from app.app.checkpointer_factory import CheckpointerFactory, get_checkpointer_factory
 from app.app.langchain_util import LangChainUtil
+from app.app.policy_middleware import PolicyMiddleware
 from app.core.config import settings
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
@@ -33,12 +35,15 @@ from app.core.sse import (
     SSE_EVENT_TOKEN,
     SSE_EVENT_TOOL_CALL_END,
     SSE_EVENT_TOOL_CALL_START,
+    SSE_EVENT_TOOL_HITL_REQUIRED,
     format_sse_done,
     format_sse_event,
 )
 from app.db.schema import TbApp, TbAppSkill, TbAppTool, TbMcpServer, TbSkill, TbSkillTool, TbTool
+from app.db.session import SessionLocal
 from app.model.open_model import AgentRunRequest
 from app.service.app_log_service import ZERO_USAGE, AppLogService
+from app.service.policy_service import PolicyAuditWriter
 from app.service.skill_service import RESERVED_SKILL_NAMES
 
 logger = logging.getLogger(__name__)
@@ -131,7 +136,7 @@ class AgentApp:
         *,
         request_type: str = "api",
     ) -> dict[str, Any]:
-        prep = self._prepare(db, req, request_type)
+        prep = self._prepare(db, req, req_ctx, request_type)
         handler = CallbackHandler()
         started_at = time.perf_counter()
         try:
@@ -193,10 +198,49 @@ class AgentApp:
 
         db 会在流开始前关闭；日志写入在 finally 块中使用独立 session。
         """
-        prep = self._prepare(db, req, request_type)
+        prep = self._prepare(db, req, req_ctx, request_type)
         # 流前 DB 操作完成，关闭 session（日志写入走独立 session）
         db.close()
+        async for chunk in self._stream_with_input(
+            prep, prep.payload, req_ctx, request_type=request_type, emit_initial_todos=True
+        ):
+            yield chunk
 
+    async def resume_stream(
+        self,
+        db: Session,
+        req: AgentRunRequest,
+        req_ctx: RequestContext,
+        *,
+        hitl_response: dict[str, Any],
+        request_type: str = "chat",
+    ) -> AsyncGenerator[str, None]:
+        """HITL 用户响应到达后续跑被 interrupt() 暂停的 agent。
+
+        与 stream 共享 _prepare（同一会话同一线程，agent 工具与中间件配置必须保持一致），
+        差别仅在 astream_events 的输入：用 Command(resume=...) 把响应注入到 interrupt() 调用站点。
+        """
+        prep = self._prepare(db, req, req_ctx, request_type)
+        db.close()
+        async for chunk in self._stream_with_input(
+            prep,
+            Command(resume=hitl_response),
+            req_ctx,
+            request_type=request_type,
+            emit_initial_todos=False,
+        ):
+            yield chunk
+
+    async def _stream_with_input(
+        self,
+        prep: _Prepared,
+        agent_input: Any,
+        req_ctx: RequestContext,
+        *,
+        request_type: str,
+        emit_initial_todos: bool,
+    ) -> AsyncGenerator[str, None]:
+        """stream / resume_stream 共用的事件循环；agent_input 决定是新发起还是 resume。"""
         handler = CallbackHandler()
         started_at = time.perf_counter()
         full_content = ""
@@ -220,8 +264,8 @@ class AgentApp:
         yield format_sse_event(SSE_EVENT_METADATA, metadata_event)
 
         # 初始 todos 快照：用户重新打开会话发消息时，先把 checkpoint 里已有的
-        # todos 推一次，避免 panel 留白等下一次 write_todos。
-        if prep.use_checkpoint and prep.thread_id:
+        # todos 推一次，避免 panel 留白等下一次 write_todos。resume 路径不需要重发。
+        if emit_initial_todos and prep.use_checkpoint and prep.thread_id:
             try:
                 saver = self._checkpointer_factory.get()
                 ckpt = await saver.aget_tuple({"configurable": {"thread_id": prep.thread_id}})
@@ -245,7 +289,7 @@ class AgentApp:
         try:
             with propagate_attributes(metadata=prep.observation_metadata):
                 async for event in prep.agent.astream_events(
-                    prep.payload, version="v2", config=prep.invoke_config(handler)
+                    agent_input, version="v2", config=prep.invoke_config(handler)
                 ):
                     kind = event.get("event")
                     data = event.get("data") or {}
@@ -355,6 +399,13 @@ class AgentApp:
             if usage_found:
                 token_usage = dict(accumulated)
 
+            # astream_events 自然结束后，若 PolicyMiddleware 调用过 interrupt()，
+            # LangGraph 会把 pending interrupt 写在 state.tasks[].interrupts 上。
+            # 把每条匹配 type=tool_hitl_required 的载荷推 SSE，并写一条 hitl_required 审计。
+            for hitl_payload in await self._collect_pending_hitl(prep):
+                yield format_sse_event(SSE_EVENT_TOOL_HITL_REQUIRED, hitl_payload)
+                self._audit_hitl_required(hitl_payload, prep, req_ctx)
+
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             trace_id = handler.last_trace_id
 
@@ -394,7 +445,13 @@ class AgentApp:
                 token_usage=token_usage,
             )
 
-    def _prepare(self, db: Session, req: AgentRunRequest, request_type: str) -> _Prepared:
+    def _prepare(
+        self,
+        db: Session,
+        req: AgentRunRequest,
+        req_ctx: RequestContext,
+        request_type: str,
+    ) -> _Prepared:
         app = self._app_runtime.get_app(db, req.app_id)
         if app.app_type != "agent":
             raise ServiceError(ErrorCode.BAD_REQUEST, "app is not agent type")
@@ -404,19 +461,21 @@ class AgentApp:
         model = self._langchain_util.build_chat_model(runtime_config)
         # 主 agent 只挂应用直接绑定的工具；技能工具随技能 subagent 懒加载，
         # 避免所有技能的工具 schema 从第一轮就挤占主 agent 上下文。
-        tools = self._build_app_tools(db, req.app_id)
+        tools, tool_metadata = self._build_app_tools_with_metadata(db, req.app_id)
         system_prompt = (app_config.get("system_prompt") or "").strip()
         backend = self._backend_factory.create(app_config)
 
-        skill_subagents = self._build_skill_subagents(db, req.app_id, model=model)
+        skill_subagents = self._build_skill_subagents(
+            db, app.id, model=model, req=req, req_ctx=req_ctx
+        )
         extra_subagents = app_config.get("sub_agents")
         all_subagents: list[Any] = list(skill_subagents)
         if isinstance(extra_subagents, list):
             all_subagents.extend(extra_subagents)
 
-        # use_checkpoint 同时受请求字段和 app 开关约束：调用方明示开启 + app 配置允许。
-        # thread_id 缺失时即使开启也降级为不写 checkpoint，避免运行态污染。
-        use_checkpoint = bool(req.use_checkpoint and app.enable_long_session and req.thread_id)
+        # 长会话对所有 agent app 默认开启；调用方仍需 use_checkpoint=True 显式确认
+        # （直 API 一次性调用不需要 checkpoint）。thread_id 缺失时仍降级，避免运行态污染。
+        use_checkpoint = bool(req.use_checkpoint and req.thread_id)
         agent_kwargs: dict[str, Any] = {
             "model": model,
             "tools": tools,
@@ -427,6 +486,18 @@ class AgentApp:
             agent_kwargs["subagents"] = all_subagents
         if use_checkpoint:
             agent_kwargs["checkpointer"] = self._checkpointer_factory.get()
+
+        # 工具治理中间件：主 agent + 每个技能 subagent 都各挂一份，确保技能内调用也走治理。
+        # subagent 的中间件实例在 _build_skill_subagents 里按 skill 工具子集构建。
+        if tool_metadata["name_to_id"]:
+            agent_kwargs["middleware"] = [
+                self._make_policy_middleware(
+                    tool_metadata=tool_metadata,
+                    req=req,
+                    req_ctx=req_ctx,
+                    app_id=app.id,
+                )
+            ]
         agent = create_deep_agent(**agent_kwargs)
         payload: dict[str, Any] = {
             "messages": [message.model_dump() for message in req.messages],
@@ -498,10 +569,16 @@ class AgentApp:
             log_db.close()
 
     def _build_app_tools(self, db: Session, app_id: int) -> list[Any]:
-        """仅收集应用直接绑定的工具。
+        tools, _ = self._build_app_tools_with_metadata(db, app_id)
+        return tools
 
-        技能绑定的工具不在这里加载——它们会进入对应技能 subagent 的 tools，只在
-        主 agent 委派到该技能时才出现在模型可见范围。
+    def _build_app_tools_with_metadata(
+        self, db: Session, app_id: int
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """收集应用直接绑定的工具，同时返回 PolicyMiddleware 需要的元数据。
+
+        返回 (tools, {"name_to_id": ..., "id_to_risk": ...})。
+        技能工具不在这里——它们走 subagent 各自加载。
         """
         tool_ids: list[int] = []
         seen: set[int] = set()
@@ -509,16 +586,23 @@ class AgentApp:
             if binding.tool_id not in seen:
                 seen.add(binding.tool_id)
                 tool_ids.append(binding.tool_id)
-        return self._load_tools_by_ids(db, tool_ids)
+        return self._load_tools_with_metadata(db, tool_ids)
 
     def _build_skill_subagents(
-        self, db: Session, app_id: int, *, model: Any
+        self,
+        db: Session,
+        app_id: int,
+        *,
+        model: Any,
+        req: AgentRunRequest,
+        req_ctx: RequestContext,
     ) -> list[dict[str, Any]]:
         """每个 enabled 绑定技能渲染成一个 SubAgent 规格。
 
         - name/description 来自 TbSkill，主 agent 通过 task 工具按名字委派
         - system_prompt 用 skill.instruction（渐进披露：主 agent 看不到，委派时才进入上下文）
         - tools 只含该技能通过 TbSkillTool 声明的工具，天然做到工具隔离
+        - middleware 挂当前技能工具子集对应的 PolicyMiddleware，覆盖技能内的工具治理
         """
         subagents: list[dict[str, Any]] = []
         bindings = db.scalars(select(TbAppSkill).where(TbAppSkill.app_id == app_id)).all()
@@ -545,29 +629,154 @@ class AgentApp:
                 if row.tool_id not in seen:
                     seen.add(row.tool_id)
                     tool_ids.append(row.tool_id)
-            skill_tools = self._load_tools_by_ids(db, tool_ids)
+            skill_tools, skill_tool_metadata = self._load_tools_with_metadata(db, tool_ids)
             description = (skill.description or skill.name).strip()
             if len(description) > 1024:
                 description = description[:1024]
-            subagents.append(
-                {
-                    "name": skill.name,
-                    "description": description,
-                    "system_prompt": skill.instruction,
-                    "tools": skill_tools,
-                    "model": model,
-                }
-            )
+            spec: dict[str, Any] = {
+                "name": skill.name,
+                "description": description,
+                "system_prompt": skill.instruction,
+                "tools": skill_tools,
+                "model": model,
+            }
+            if skill_tool_metadata["name_to_id"]:
+                spec["middleware"] = [
+                    self._make_policy_middleware(
+                        tool_metadata=skill_tool_metadata,
+                        req=req,
+                        req_ctx=req_ctx,
+                        app_id=app_id,
+                    )
+                ]
+            subagents.append(spec)
         return subagents
 
     def _load_tools_by_ids(self, db: Session, tool_ids: list[int]) -> list[Any]:
+        tools, _ = self._load_tools_with_metadata(db, tool_ids)
+        return tools
+
+    def _load_tools_with_metadata(
+        self, db: Session, tool_ids: list[int]
+    ) -> tuple[list[Any], dict[str, Any]]:
+        """加载工具同时收集 PolicyMiddleware 需要的 name→id / id→risk / id→hitl_timeout 映射。"""
         tools: list[Any] = []
+        name_to_id: dict[str, int] = {}
+        id_to_risk: dict[int, str] = {}
+        id_to_timeout: dict[int, int | None] = {}
         for tool_id in tool_ids:
             tool = db.get(TbTool, tool_id)
             if not tool or tool.tool_status != "enabled":
                 continue
             tools.append(self._build_tool(db, tool))
-        return tools
+            if tool.tool_name not in name_to_id:
+                name_to_id[tool.tool_name] = tool.id
+            id_to_risk[tool.id] = (tool.risk_level or "low").lower()
+            id_to_timeout[tool.id] = tool.hitl_timeout_seconds
+        return (
+            tools,
+            {
+                "name_to_id": name_to_id,
+                "id_to_risk": id_to_risk,
+                "id_to_hitl_timeout": id_to_timeout,
+            },
+        )
+
+    async def _collect_pending_hitl(self, prep: _Prepared) -> list[dict[str, Any]]:
+        """从 LangGraph state.tasks 提取 PolicyMiddleware 写下的 tool_hitl_required 载荷。
+
+        没启用 checkpoint / 取 state 失败 / 没 interrupt 都返回空列表。
+        """
+        if not (prep.use_checkpoint and prep.thread_id):
+            return []
+        config = {"configurable": {"thread_id": prep.thread_id}}
+        try:
+            state = await prep.agent.aget_state(config)
+        except Exception:
+            logger.exception("failed to read interrupt state for thread %s", prep.thread_id)
+            return []
+        payloads: list[dict[str, Any]] = []
+        for task in getattr(state, "tasks", ()) or ():
+            for itr in getattr(task, "interrupts", ()) or ():
+                value = getattr(itr, "value", None)
+                if isinstance(value, dict) and value.get("type") == "tool_hitl_required":
+                    payloads.append(value)
+        return payloads
+
+    def _audit_hitl_required(
+        self,
+        payload: dict[str, Any],
+        prep: _Prepared,
+        req_ctx: RequestContext,
+    ) -> None:
+        """interrupt 命中后写一行 hitl_required 审计；与中间件的 response 审计配对。"""
+        writer = PolicyAuditWriter(SnowflakeGenerator(settings.snowflake_worker_id))
+        tool_id_raw = payload.get("tool_id")
+        tool_id_int: int | None = None
+        if tool_id_raw is not None:
+            try:
+                tool_id_int = int(tool_id_raw)
+            except (TypeError, ValueError):
+                tool_id_int = None
+        matched_rule_raw = payload.get("matched_rule_id")
+        matched_rule_int: int | None = None
+        if matched_rule_raw is not None:
+            try:
+                matched_rule_int = int(matched_rule_raw)
+            except (TypeError, ValueError):
+                matched_rule_int = None
+        conv_id = int(prep.thread_id) if prep.thread_id else None
+        params = payload.get("parameters")
+        if not isinstance(params, dict):
+            params = {}
+        db = SessionLocal()
+        try:
+            writer.write(
+                db,
+                event_type="hitl_required",
+                tool_id=tool_id_int,
+                conversation_id=conv_id,
+                run_id=prep.thread_id,
+                user_id=req_ctx.user_id,
+                app_id=prep.app.id,
+                parameters=params,
+                decision_reason=payload.get("reason"),
+                matched_rule_id=matched_rule_int,
+            )
+        except Exception:
+            logger.exception(
+                "hitl_required audit write failed: thread=%s tool_id=%s",
+                prep.thread_id,
+                tool_id_int,
+            )
+        finally:
+            db.close()
+
+    def _make_policy_middleware(
+        self,
+        *,
+        tool_metadata: dict[str, Any],
+        req: AgentRunRequest,
+        req_ctx: RequestContext,
+        app_id: int,
+    ) -> PolicyMiddleware:
+        """每次 agent 执行新建一份 PolicyMiddleware，绑定本次运行的上下文。
+
+        主 agent 与每个技能 subagent 各自持有一份；tool_metadata 范围按调用方传入的工具子集。
+        """
+        return PolicyMiddleware(
+            tool_id_by_name=tool_metadata["name_to_id"],
+            risk_level_by_tool_id=tool_metadata["id_to_risk"],
+            audit_writer=PolicyAuditWriter(SnowflakeGenerator(settings.snowflake_worker_id)),
+            hitl_timeout_by_tool_id=tool_metadata.get("id_to_hitl_timeout") or {},
+            default_hitl_timeout_seconds=settings.hitl_timeout_seconds,
+            run_id=req.thread_id,
+            conversation_id=int(req.thread_id) if req.thread_id else None,
+            user_id=req_ctx.user_id,
+            app_id=app_id,
+            # user_role 暂未统一在 RequestContext 上挂载，留空；后续合规 PR 再补。
+            user_role=None,
+        )
 
     def _build_tool(self, db: Session, tool: TbTool) -> Any:
         parameters = self._parse_json(tool.parameters)

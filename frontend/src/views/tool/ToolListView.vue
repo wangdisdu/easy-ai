@@ -133,7 +133,16 @@
               <div v-if="expandedId === t.id" class="tool-detail" @click.stop>
                 <div class="detail-grid">
                   <div><span class="detail-label">工具分组</span><span class="detail-value">{{ t.tool_group || "-" }}</span></div>
-                  <div><span class="detail-label">风险等级</span><span :class="['risk-tag', 'risk-tag--' + (t.risk_level || 'low')]">{{ t.risk_level || "low" }}</span></div>
+                  <div>
+                    <span class="detail-label">风险等级</span>
+                    <a-select
+                      :value="t.risk_level || 'low'"
+                      size="small"
+                      style="width: 96px"
+                      :options="riskOptions"
+                      @change="(v: unknown) => onRiskChange(t, String(v))"
+                    />
+                  </div>
                 </div>
                 <div class="detail-section">
                   <span class="detail-label">参数定义（JSON Schema）</span>
@@ -141,6 +150,7 @@
                 </div>
                 <div class="detail-footer">
                   <a-button size="small" type="link" @click="router.push(`/tool/api-tool/${t.id}`)">编辑</a-button>
+                  <a-button size="small" type="link" @click="openPolicyEditor(t)">策略</a-button>
                   <a-button v-if="t.tool_status === 'enabled'" size="small" type="link" class="btn-warn" @click="onDisable(t)">停用</a-button>
                   <a-button v-else size="small" type="link" class="btn-green" @click="onEnable(t)">启用</a-button>
                   <span class="detail-spacer" />
@@ -197,7 +207,16 @@
               <div class="detail-grid">
                 <div><span class="detail-label">工具名称</span><span class="detail-value detail-mono">{{ t.tool_name }}</span></div>
                 <div><span class="detail-label">工具分组</span><span class="detail-value">{{ t.tool_group || "-" }}</span></div>
-                <div><span class="detail-label">风险等级</span><span :class="['risk-tag', 'risk-tag--' + (t.risk_level || 'low')]">{{ t.risk_level || "low" }}</span></div>
+                <div>
+                  <span class="detail-label">风险等级</span>
+                  <a-select
+                    :value="t.risk_level || 'low'"
+                    size="small"
+                    style="width: 96px"
+                    :options="riskOptions"
+                    @change="(v: unknown) => onRiskChange(t, String(v))"
+                  />
+                </div>
               </div>
               <div class="detail-section">
                 <span class="detail-label">功能描述</span>
@@ -235,6 +254,7 @@
 
               <div class="detail-footer">
                 <a-button size="small" type="link" @click="router.push(`/tool/api-tool/${t.id}`)">编辑</a-button>
+                <a-button size="small" type="link" @click="openPolicyEditor(t)">策略</a-button>
                 <a-button v-if="t.tool_status === 'enabled'" size="small" type="link" class="btn-warn" @click="onDisable(t)">停用</a-button>
                 <a-button v-else size="small" type="link" class="btn-green" @click="onEnable(t)">启用</a-button>
                 <span class="detail-spacer" />
@@ -265,6 +285,21 @@
         @change="loadList"
       />
     </div>
+
+    <a-drawer
+      v-model:open="policyDrawerOpen"
+      :title="`策略：${policyTool?.tool_name ?? ''}`"
+      width="640"
+      :destroy-on-close="true"
+    >
+      <ToolPolicyEditor
+        v-if="policyTool"
+        :tool-id="policyTool.id"
+        :tool-parameters="policyParamKeys"
+        @saved="policyDrawerOpen = false"
+        @cancel="policyDrawerOpen = false"
+      />
+    </a-drawer>
   </section>
 </template>
 
@@ -282,6 +317,7 @@ import { message } from "ant-design-vue";
 import * as toolApi from "@/api/tool";
 import type { BuiltinToolResp, McpServerResp, ToolResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
+import ToolPolicyEditor from "@/components/ToolPolicyEditor.vue";
 
 const router = useRouter();
 
@@ -296,6 +332,20 @@ const expandedId = ref<string | null>(null);
 const builtinTools = ref<BuiltinToolResp[]>([]);
 const dbTools = ref<ToolResp[]>([]);
 const mcpServers = ref<McpServerResp[]>([]);
+
+// 策略编辑 drawer
+const policyDrawerOpen = ref(false);
+const policyTool = ref<ToolResp | null>(null);
+const policyParamKeys = computed<string[]>(() => {
+  const params = policyTool.value?.parameters as Record<string, unknown> | undefined;
+  const props = (params?.properties ?? {}) as Record<string, unknown>;
+  return Object.keys(props);
+});
+
+function openPolicyEditor(tool: ToolResp) {
+  policyTool.value = tool;
+  policyDrawerOpen.value = true;
+}
 
 const sourceFilters = [
   { label: "全部", value: "all" },
@@ -416,6 +466,24 @@ async function onDisable(t: ToolResp) {
   await toolApi.disableTool(t.id);
   message.success("已停用");
   loadList();
+}
+
+const riskOptions = [
+  { label: "low", value: "low" },
+  { label: "medium", value: "medium" },
+  { label: "high", value: "high" },
+];
+
+async function onRiskChange(t: ToolResp, level: string) {
+  if ((t.risk_level || "low") === level) return;
+  try {
+    await toolApi.updateTool(t.id, { risk_level: level });
+    t.risk_level = level;
+    message.success(`风险等级已更新为 ${level}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    message.error("更新失败：" + msg);
+  }
 }
 
 onMounted(() => {

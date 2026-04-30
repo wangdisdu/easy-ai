@@ -10,7 +10,6 @@
 
 **范围内**：
 - AsyncPostgresSaver 接入、连接池管理、lifespan 管理
-- `tb_app.enable_long_session` 开关
 - `tb_conversation.thread_id` 字段
 - `AgentApp._prepare` / `run` / `stream` 的 checkpointer 接线
 - `conversation_service.send_message_stream` 输入协议切换 + 降级重建
@@ -33,7 +32,7 @@
 | 2 | 数据库位置 | 和业务库共库，建独立 schema `lg_checkpoint` |
 | 3 | Checkpoint 表管理 | alembic 迁移贴 `SETUP_QUERIES`，不跑 `setup()` |
 | 4 | `thread_id` 字段 | `tb_conversation` 新增 `thread_id VARCHAR(64) NULL`，**会话第一次被真正调用时**落地 `str(conversation_id)`，之后永不变；有唯一索引 |
-| 5 | 开关粒度 | `tb_app.enable_long_session INT NOT NULL DEFAULT 0` |
+| 5 | 开关粒度 | 所有 agent app 默认开启；调用方按 `AgentRunRequest.use_checkpoint` 显式 opt-in |
 | 6 | Message 输入协议 | 开关开 + checkpoint 存在 → 只传本轮新消息；checkpoint 缺失 → 从业务消息表降级重建，发 audit + SSE 标 `degraded:true` |
 | 7 | Checkpoint 保留期 | 会话归档日 +30 天后清 checkpoint；业务消息与反馈不受影响；被遗忘权立即清 |
 | 8 | `run()` sync→async | 改 async，上游 `open_api.py` 对应路由也改 async |
@@ -45,8 +44,6 @@
 **业务库变更**：
 
 ```sql
-ALTER TABLE tb_app ADD COLUMN enable_long_session INT NOT NULL DEFAULT 0;
-
 ALTER TABLE tb_conversation ADD COLUMN thread_id VARCHAR(64) NULL;
 ALTER TABLE tb_conversation ADD COLUMN checkpoint_status VARCHAR(32) NOT NULL DEFAULT 'active';
 -- checkpoint_status: active / degraded / purged
@@ -112,7 +109,7 @@ CREATE INDEX idx_tb_session_audit_conv ON tb_session_audit(conversation_id, crea
   - 调 agent 时 `config={"configurable": {"thread_id": thread_id}, "callbacks": [...]}`
 
 - `backend/app/service/conversation_service.py`
-  - `send_message_stream` 内按 `app.enable_long_session` 分支：
+  - `send_message_stream` 对 agent 类型默认走 checkpoint 路径；非 agent（llm / rag）保留全量历史：
     - 开：首次调用时为 `TbConversation.thread_id` 赋值（`str(conversation_id)`）；探测 checkpoint，存在则 messages 只带一条新消息，不存在走降级重建并写 audit
     - 关：沿用今天的全量历史组装
   - `delete_conversation` 级联删 checkpoint（`await saver.adelete_thread(thread_id)`）
@@ -188,7 +185,6 @@ saver.aget_tuple({thread_id}) = None
 | 位置 | 变更 | 兼容性 |
 |---|---|---|
 | `AgentRunRequest` | `+ thread_id`、`+ use_checkpoint`、`+ degraded` | 默认值兼容老调用方 |
-| `tb_app.enable_long_session` | 新字段默认 0 | 存量应用完全不受影响 |
 | SSE `metadata` 事件 | `+ thread_id: str`、`+ degraded: bool` | 前端忽略未知字段即可 |
 | `DELETE /api/v1/conversation/{id}` | 行为扩展：同时删 checkpoint | 对外行为更彻底，不破契约 |
 | 新 API `POST /api/v1/conversation/{id}/reset` | 清该会话 checkpoint，不删业务消息 | 新 API |
@@ -214,7 +210,7 @@ saver.aget_tuple({thread_id}) = None
 
 ## 8. 灰度与回滚
 
-- 上线默认 `enable_long_session = 0`，所有应用不受影响
+- 长会话对所有 agent app 默认生效；调用方关闭 `use_checkpoint` 即可退化
 - 先挑 1 个内部测试 app 开启，观察 2 周
 - 每个 app 开关独立，出问题只关该 app
 - 代码级回滚：把 `use_checkpoint` 常量化为 False 即可退回旧行为

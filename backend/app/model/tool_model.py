@@ -96,6 +96,7 @@ class ToolCreateReq(BaseModel):
     risk_level: str | None = Field(default="low", max_length=255)
     mcp_server_id: str | None = Field(default=None)
     api_config: dict | None = Field(default=None)
+    hitl_timeout_seconds: int | None = Field(default=None, ge=1)
 
 
 class ToolUpdateReq(BaseModel):
@@ -105,6 +106,7 @@ class ToolUpdateReq(BaseModel):
     tool_group: str | None = Field(default=None, max_length=255)
     risk_level: str | None = Field(default=None, max_length=255)
     api_config: dict | None = Field(default=None)
+    hitl_timeout_seconds: int | None = Field(default=None, ge=1)
 
 
 class ToolPageReq(BaseModel):
@@ -126,6 +128,7 @@ class ToolResp(BaseModel):
     tool_status: str
     mcp_server_id: str | None = None
     api_config: dict | None = None
+    hitl_timeout_seconds: int | None = None
     create_time: int
     update_time: int
 
@@ -154,6 +157,7 @@ class ToolResp(BaseModel):
             tool_status=entity.tool_status,
             mcp_server_id=str(entity.mcp_server_id) if entity.mcp_server_id else None,
             api_config=api_config,
+            hitl_timeout_seconds=entity.hitl_timeout_seconds,
             create_time=entity.create_time,
             update_time=entity.update_time,
         )

@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # 单次 MCP tool 调用最长等待秒数；超过强制切断，避免一个慢工具卡住整轮 agent。
     mcp_tool_timeout_seconds: float = Field(default=300.0)
 
+    # HITL 等待上限（秒）：工具未单独配置 hitl_timeout_seconds 时使用；超时后续跑 reject
+    hitl_timeout_seconds: int = Field(default=300)
+    # HITL 超时扫描频率
+    hitl_timeout_check_interval_seconds: int = Field(default=30)
+
     # Flowise 嵌入接入（M1）
     flowise_enabled: bool = Field(default=False)
     flowise_internal_url: str = Field(default="http://127.0.0.1:3001")

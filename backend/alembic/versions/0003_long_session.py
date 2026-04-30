@@ -9,6 +9,7 @@ Create Date: 2026-04-24 00:00:00
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "0003_long_session"
@@ -47,9 +48,7 @@ def upgrade() -> None:
             server_default="active",
         ),
     )
-    op.create_unique_constraint(
-        "uk_tb_conversation_thread_id", "tb_conversation", ["thread_id"]
-    )
+    op.create_unique_constraint("uk_tb_conversation_thread_id", "tb_conversation", ["thread_id"])
 
     # 会话审计事件表：checkpoint 重建 / 清理等，后续 Policy 层审计流也可复用。
     op.create_table(

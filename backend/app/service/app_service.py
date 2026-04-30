@@ -87,7 +87,6 @@ class AppService:
             access_scope=access_scope,
             rate_limit=req.rate_limit if req.rate_limit is not None else 60,
             enable_log=1 if req.enable_log is None or req.enable_log else 0,
-            enable_long_session=1 if req.enable_long_session else 0,
             version_id=None,
             current_version=None,
             flowise_chatflow_id=flowise_chatflow_id,
@@ -173,8 +172,6 @@ class AppService:
             entity.rate_limit = req.rate_limit
         if req.enable_log is not None:
             entity.enable_log = 1 if req.enable_log else 0
-        if req.enable_long_session is not None:
-            entity.enable_long_session = 1 if req.enable_long_session else 0
         if req.provider_id is not None:
             entity.provider_id = int(req.provider_id) if req.provider_id else None
         if req.model_id is not None:
@@ -260,7 +257,6 @@ class AppService:
             "access_scope": entity.access_scope,
             "rate_limit": entity.rate_limit,
             "enable_log": bool(entity.enable_log) if entity.enable_log is not None else None,
-            "enable_long_session": bool(entity.enable_long_session),
         }
 
         version = TbAppVersion(

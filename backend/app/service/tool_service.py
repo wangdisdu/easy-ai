@@ -290,6 +290,7 @@ class ToolService:
             tool_status="enabled",
             mcp_server_id=int(req.mcp_server_id) if req.mcp_server_id else None,
             api_config=(json.dumps(req.api_config, ensure_ascii=False) if req.api_config else None),
+            hitl_timeout_seconds=req.hitl_timeout_seconds,
             create_time=now,
             update_time=now,
             create_user=req_ctx.user_id,
@@ -351,6 +352,8 @@ class ToolService:
             entity.risk_level = req.risk_level
         if req.api_config is not None:
             entity.api_config = json.dumps(req.api_config, ensure_ascii=False)
+        if req.hitl_timeout_seconds is not None:
+            entity.hitl_timeout_seconds = req.hitl_timeout_seconds
 
         entity.update_time = req_ctx.request_time_ms
         entity.update_user = req_ctx.user_id

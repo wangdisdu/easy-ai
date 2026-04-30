@@ -108,6 +108,8 @@ class TbTool(Base):
     tool_status: Mapped[str] = mapped_column(String(255), nullable=False)
     mcp_server_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     api_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # HITL 超时秒数；NULL 走 settings.hitl_timeout_seconds（默认 300）；超时按 reject 续跑。
+    hitl_timeout_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -217,8 +219,6 @@ class TbApp(Base):
     access_scope: Mapped[str] = mapped_column(String(255), nullable=False)
     rate_limit: Mapped[int] = mapped_column(Integer, nullable=False)
     enable_log: Mapped[int] = mapped_column(Integer, nullable=False)
-    # 长会话总开关：0 关闭（兼容老行为，全量历史）；1 开启（走 Checkpointer，只传新消息）
-    enable_long_session: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     version_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     current_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Flowise chatflow uuid，仅 app_type=agent_flow 时写入
@@ -339,4 +339,51 @@ class TbSessionAudit(Base):
     conversation_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class TbToolPolicy(Base):
+    """工具策略规则集。一行 = 一条规则；版本演化用行级软改（superseded_by_id）。"""
+
+    __tablename__ = "tb_tool_policy"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tool_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    # action: 'deny' / 'allow' / 'require_hitl'
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    # when_ast: JSON 文本，结构见 tool-approval-and-acl-design.md §5.1
+    when_ast: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # mode: 'active' / 'shadow'
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="shadow")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # 当前版本 NULL；历史版本指向取代它的新版本 id
+    superseded_by_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    owner_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbToolAudit(Base):
+    """工具治理决策事件流（append-only），与 tb_session_audit 并列。"""
+
+    __tablename__ = "tb_tool_audit"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # event_type: tool_invoked / policy_denied / hitl_required /
+    #   hitl_confirmed / hitl_modified / hitl_rejected / hitl_timeout /
+    #   policy_modified
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    tool_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    conversation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    app_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # 参数快照（JSON），入库前过 PII 脱敏
+    parameters_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    matched_rule_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
