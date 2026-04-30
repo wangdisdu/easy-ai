@@ -387,3 +387,46 @@ class TbToolAudit(Base):
     decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     matched_rule_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class TbMemory(Base):
+    """长期记忆 KV：scope=user / app；agent 写工具或人工写都落这张表。"""
+
+    __tablename__ = "tb_memory"
+    __table_args__ = (
+        UniqueConstraint("scope", "scope_id", "memory_key", name="uk_tb_memory_scope_key"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)  # 'user' | 'app'
+    scope_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 写入者（人工 API / agent 工具调用时的当前 user）；admin 后台批量任务可为 NULL
+    owner_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    memory_value: Mapped[str] = mapped_column(Text, nullable=False)
+    # source: 'user_explicit' / 'agent_learned' / 'admin_set'
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbMemoryAudit(Base):
+    """记忆变更事件流（append-only），与 tb_tool_audit / tb_session_audit 并列。"""
+
+    __tablename__ = "tb_memory_audit"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # event_type: 'remembered' / 'updated' / 'forgotten' / 'admin_purged'
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    memory_value_before: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memory_value_after: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    app_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    conversation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)

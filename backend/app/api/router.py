@@ -4,6 +4,7 @@ from app.api.app_api import router as app_router
 from app.api.auth_api import router as auth_router
 from app.api.conversation_api import router as conversation_router
 from app.api.llm_api import router as llm_router
+from app.api.memory_api import router as memory_router
 from app.api.observability_api import router as observability_router
 from app.api.open_api import router as open_router
 from app.api.policy_api import policy_router
@@ -32,3 +33,4 @@ api_router.include_router(mcp_router, dependencies=_login_required)
 api_router.include_router(llm_router, dependencies=_login_required)
 api_router.include_router(observability_router, dependencies=_login_required)
 api_router.include_router(conversation_router, dependencies=_login_required)
+api_router.include_router(memory_router, dependencies=_login_required)

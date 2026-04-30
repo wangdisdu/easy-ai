@@ -100,6 +100,7 @@ const auth = useAuthStore();
 
 type IconKey =
   | "appstore"
+  | "bulb"
   | "cluster"
   | "database"
   | "eye"

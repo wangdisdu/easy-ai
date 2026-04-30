@@ -51,7 +51,11 @@
       </div>
     </div>
 
-    <div class="hitl-card-footer">
+    <div v-if="timedOut" class="hitl-timeout-banner">
+      <a-spin size="small" />
+      <span>等待超时，已自动取消并继续 agent…</span>
+    </div>
+    <div v-else class="hitl-card-footer">
       <a-button
         v-if="editing"
         size="small"
@@ -90,11 +94,21 @@
         >确认执行</a-button>
       </template>
     </div>
+
+    <!-- 卡片底部进度条：剩余时间占总等待时长的比例。
+         数值通过 transition 平滑过渡；颜色随风险等级走。
+         没有 deadline 数据时整条隐藏，不占视觉。 -->
+    <div v-if="progressVisible" class="hitl-progress">
+      <div
+        :class="['hitl-progress-fill', `hitl-progress-fill--${riskLevel}`]"
+        :style="{ width: progressPercent + '%' }"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ClockCircleOutlined, PauseCircleOutlined } from "@ant-design/icons-vue";
 import type { HitlAction } from "@/api/conversation";
 
@@ -119,6 +133,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "respond", action: HitlAction, parameters?: Record<string, unknown>): void;
+  (e: "timeout"): void;
 }>();
 
 const editing = ref(false);
@@ -150,14 +165,14 @@ const riskLabel = computed(() => {
   }
 });
 
-// 倒计时：仅在剩余 ≤ 10s 时显示，避免一直占视觉位
+// 进度条 / 倒计时共用一份心跳；500ms 让进度条肉眼平滑，倒计时只用秒粒度
 const now = ref(Date.now());
 let timer: number | null = null;
 onMounted(() => {
   if (props.payload.deadline_ms) {
     timer = window.setInterval(() => {
       now.value = Date.now();
-    }, 1000);
+    }, 500);
   }
 });
 onBeforeUnmount(() => {
@@ -177,6 +192,35 @@ const countdownVisible = computed(() => {
   if (remainingSeconds.value === null) return false;
   return remainingSeconds.value <= 10;
 });
+
+const progressVisible = computed(() => {
+  return !!props.payload.deadline_ms && !!props.payload.timeout_seconds;
+});
+
+const progressPercent = computed(() => {
+  const total = props.payload.timeout_seconds ?? 0;
+  const deadline = props.payload.deadline_ms ?? 0;
+  if (!total || !deadline) return 0;
+  const remainingMs = deadline - now.value;
+  if (remainingMs <= 0) return 0;
+  const pct = (remainingMs / (total * 1000)) * 100;
+  if (pct > 100) return 100;
+  return pct;
+});
+
+// 到点自动 reject：避免用户面前卡片"无人响应、agent 后台还在跑"的怪象。
+// 触发时同时通知父组件 onTimeout，让它走标准 respond 通道——SSE 续跑能把
+// agent 后续输出实时推回到当前对话。worker 仍是关闭页面/失焦场景的兜底。
+const autoFired = ref(false);
+watch(remainingSeconds, (value) => {
+  if (value === null || value > 0) return;
+  if (autoFired.value || props.busy) return;
+  autoFired.value = true;
+  emit("timeout");
+  emit("respond", "reject");
+});
+
+const timedOut = computed(() => remainingSeconds.value === 0);
 
 function startEdit() {
   paramsDraft.value = paramsText.value;
@@ -226,69 +270,18 @@ function onAction(action: HitlAction) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  /* 入场：从上方轻微滑入 + 淡入；只放一次，不抢注意力 */
-  animation:
-    hitl-card-enter 320ms cubic-bezier(0.16, 1, 0.3, 1),
-    hitl-card-glow 2.4s ease-in-out infinite;
+  position: relative;
+  overflow: hidden;
 }
 
 .hitl-card--medium {
   border-color: #facc15;
   background: #fefce8;
-  animation:
-    hitl-card-enter 320ms cubic-bezier(0.16, 1, 0.3, 1),
-    hitl-card-glow-medium 2.4s ease-in-out infinite;
 }
 
 .hitl-card--high {
   border-color: #ef4444;
   background: #fef2f2;
-  animation:
-    hitl-card-enter 320ms cubic-bezier(0.16, 1, 0.3, 1),
-    hitl-card-glow-high 2s ease-in-out infinite;
-}
-
-@keyframes hitl-card-enter {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* low：淡淡的金色光晕，只是"我在等" */
-@keyframes hitl-card-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(250, 204, 21, 0);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.18);
-  }
-}
-
-@keyframes hitl-card-glow-medium {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(202, 138, 4, 0);
-  }
-  50% {
-    box-shadow: 0 0 0 4px rgba(202, 138, 4, 0.22);
-  }
-}
-
-/* high：节奏更快、范围更大的红色脉冲，强引导决策 */
-@keyframes hitl-card-glow-high {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.18);
-  }
-  50% {
-    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.28);
-  }
 }
 
 .hitl-card-head {
@@ -299,21 +292,6 @@ function onAction(action: HitlAction) {
 
 .hitl-card-icon {
   font-size: 16px;
-  /* 暂停图标"呼吸"：透明度 + 缩放轻微变化，告诉用户卡片仍在等待 */
-  animation: hitl-icon-breath 1.8s ease-in-out infinite;
-  transform-origin: center;
-}
-
-@keyframes hitl-icon-breath {
-  0%,
-  100% {
-    opacity: 0.7;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.12);
-  }
 }
 
 .hitl-card-icon--low {
@@ -375,31 +353,6 @@ function onAction(action: HitlAction) {
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  /* 最后 10s 才出现的徽标，节奏快、对比强，迫使用户做决策 */
-  animation: hitl-countdown-pulse 1s ease-in-out infinite;
-}
-
-@keyframes hitl-countdown-pulse {
-  0%,
-  100% {
-    background: #fee2e2;
-    transform: scale(1);
-  }
-  50% {
-    background: #fecaca;
-    transform: scale(1.08);
-  }
-}
-
-/* 尊重系统"减少动效"：关闭所有非必需动画，避免眩晕用户 */
-@media (prefers-reduced-motion: reduce) {
-  .hitl-card,
-  .hitl-card--medium,
-  .hitl-card--high,
-  .hitl-card-icon,
-  .hitl-countdown {
-    animation: none !important;
-  }
 }
 
 .hitl-card-body {
@@ -473,5 +426,43 @@ function onAction(action: HitlAction) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.hitl-timeout-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #b91c1c;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 进度条：贴卡片底部内沿，不挤压内容。
+   宽度由 :style 驱动；transition 让 500ms 心跳之间也是平滑下滑。 */
+.hitl-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.hitl-progress-fill {
+  height: 100%;
+  transition: width 500ms linear;
+}
+
+.hitl-progress-fill--low {
+  background: #10b981;
+}
+
+.hitl-progress-fill--medium {
+  background: #ca8a04;
+}
+
+.hitl-progress-fill--high {
+  background: #dc2626;
 }
 </style>

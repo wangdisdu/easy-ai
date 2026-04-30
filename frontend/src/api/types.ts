@@ -69,6 +69,7 @@ export interface AppResp {
   flowise_chatflow_id?: string | null;
   tool_ids?: string[];
   skill_ids?: string[];
+  create_user?: string | null;
   create_time: number;
   update_time: number;
 }

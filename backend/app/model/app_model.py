@@ -73,6 +73,7 @@ class AppResp(BaseModel):
     # 仅 agent 应用返回：绑定的工具/技能 ID 列表
     tool_ids: list[str] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list)
+    create_user: str | None = None
     create_time: int
     update_time: int
 
@@ -97,6 +98,7 @@ class AppResp(BaseModel):
             version_id=entity.version_id,
             current_version=entity.current_version,
             flowise_chatflow_id=entity.flowise_chatflow_id,
+            create_user=str(entity.create_user) if entity.create_user is not None else None,
             create_time=entity.create_time,
             update_time=entity.update_time,
         )

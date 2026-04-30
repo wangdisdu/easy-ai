@@ -148,10 +148,24 @@
         </template>
 
         <!-- 流式 AI 回复（工具 + 文本合并为一个气泡） -->
-        <div v-if="isStreaming || streamingContent || streamingToolCalls.length || pendingHitl" class="chat-msg chat-msg--assistant">
+        <div v-if="isStreaming || streamingContent || streamingToolCalls.length || pendingHitl || resolvedHitls.length" class="chat-msg chat-msg--assistant">
           <div class="chat-avatar">AI</div>
           <div class="chat-bubble-wrap">
             <div class="chat-bubble chat-bubble--ai">
+              <!-- 已处理的 HITL 痕迹：confirm / modify / reject / timeout 各保留一行，
+                   会话刷新前一直在；下次 listMessages 重载后历史 tool 消息接力做长期凭证。 -->
+              <div
+                v-for="(rh, idx) in resolvedHitls"
+                :key="'rhitl-' + idx"
+                :class="['hitl-trail', `hitl-trail--${rh.action}`]"
+              >
+                <span :class="['hitl-trail-tag', `hitl-trail-tag--${rh.action}`]">
+                  {{ resolvedActionLabel(rh.action) }}
+                </span>
+                <span class="hitl-trail-tool">{{ rh.tool_name }}</span>
+                <span v-if="rh.modified" class="hitl-trail-note">（已修改参数）</span>
+              </div>
+
               <!-- 流式工具调用 -->
               <div
                 v-for="(tc, idx) in streamingToolCalls"
@@ -185,6 +199,7 @@
                 :payload="pendingHitl"
                 :busy="hitlBusy"
                 @respond="onHitlRespond"
+                @timeout="onHitlTimeout"
               />
             </div>
           </div>
@@ -278,6 +293,33 @@ const streamAbort = ref<{ abort: () => void } | null>(null);
 // 待响应的 HITL 暂停（一次最多挂一个；后续工具调用会接着触发新的）
 const pendingHitl = ref<HitlPayload | null>(null);
 const hitlBusy = ref(false);
+
+// HITL 处理痕迹：用户确认 / 修改 / 拒绝 / 超时拒绝后，把卡片折成一行短记，
+// 留在当前对话气泡里直到 listMessages 重载从历史接管。
+type ResolvedHitlAction = "confirm" | "modify" | "reject" | "timeout";
+interface ResolvedHitl {
+  action: ResolvedHitlAction;
+  tool_name: string;
+  risk_level: string;
+  modified: boolean;
+  time: number;
+}
+const resolvedHitls = ref<ResolvedHitl[]>([]);
+// timeout 由卡片 emit 在 respond 之前；用一次性 flag 把后续 respond 标记为 timeout
+let hitlTimeoutFlag = false;
+
+function resolvedActionLabel(action: ResolvedHitlAction): string {
+  switch (action) {
+    case "confirm":
+      return "已确认";
+    case "modify":
+      return "已修改并确认";
+    case "reject":
+      return "已拒绝";
+    case "timeout":
+      return "超时已自动拒绝";
+  }
+}
 const streamMeta = reactive<{ model: string; sources: string[]; usage: Record<string, unknown> | null; latency_ms: number | null }>({
   model: "",
   sources: [],
@@ -426,6 +468,8 @@ async function selectConversation(conv: ConversationResp) {
   // 切会话也丢弃旧的 HITL 暂停（resume 必须配同一会话）
   pendingHitl.value = null;
   hitlBusy.value = false;
+  resolvedHitls.value = [];
+  hitlTimeoutFlag = false;
   // 同步应用
   const app = publishedApps.value.find((a) => a.id === conv.app_id);
   if (app) selectedApp.value = app;
@@ -517,6 +561,8 @@ function sendMessage() {
   streamingToolCalls.value = [];
   pendingHitl.value = null;
   hitlBusy.value = false;
+  resolvedHitls.value = [];
+  hitlTimeoutFlag = false;
   streamMeta.model = "";
   streamMeta.sources = [];
   streamMeta.usage = null;
@@ -594,6 +640,7 @@ function buildStreamHandlers() {
       isStreaming.value = false;
       streamingContent.value = "";
       streamingToolCalls.value = [];
+      resolvedHitls.value = [];
 
       if (currentConversation.value) {
         convApi.listMessages(currentConversation.value.id).then(({ data }) => {
@@ -611,12 +658,27 @@ function buildStreamHandlers() {
   };
 }
 
+function onHitlTimeout() {
+  message.warning("HITL 等待超时，已自动取消", 4);
+  hitlTimeoutFlag = true;
+}
+
 function onHitlRespond(action: HitlAction, parameters?: Record<string, unknown>) {
   if (!currentConversation.value || !pendingHitl.value) return;
   if (hitlBusy.value) return;
   hitlBusy.value = true;
   isStreaming.value = true;
   const hitlId = pendingHitl.value.hitl_id;
+  // 推一条痕迹：超时触发的 reject 标 timeout，区别于用户主动 reject
+  const recordedAction: ResolvedHitlAction = hitlTimeoutFlag ? "timeout" : action;
+  hitlTimeoutFlag = false;
+  resolvedHitls.value.push({
+    action: recordedAction,
+    tool_name: pendingHitl.value.tool_name,
+    risk_level: (pendingHitl.value.risk_level || "low").toLowerCase(),
+    modified: action === "modify",
+    time: Date.now(),
+  });
   // 清掉卡片，等续跑流自然把 tool_call_end / token / 新的 hitl_required 推回来
   pendingHitl.value = null;
   const body: convApi.HitlResponseBody = { action };
@@ -635,6 +697,8 @@ function stopStream() {
   isStreaming.value = false;
   pendingHitl.value = null;
   hitlBusy.value = false;
+  resolvedHitls.value = [];
+  hitlTimeoutFlag = false;
 }
 
 // ── v-click-outside 指令 ──
@@ -1012,6 +1076,51 @@ onMounted(async () => {
 }
 
 /* 工具调用 — 紧凑行 + 点击展开 */
+/* HITL 处理痕迹：confirm / modify / reject / timeout 后保留的一行短记 */
+.hitl-trail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 4px 0;
+  color: #475569;
+}
+
+.hitl-trail-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hitl-trail-tag--confirm {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.hitl-trail-tag--modify {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.hitl-trail-tag--reject,
+.hitl-trail-tag--timeout {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.hitl-trail-tool {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color: #1f2937;
+}
+
+.hitl-trail-note {
+  color: #6b7280;
+}
+
 .chat-tool-inline {
   border-bottom: 1px solid rgba(226, 232, 240, 0.6);
   padding-bottom: 8px;

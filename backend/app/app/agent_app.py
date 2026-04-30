@@ -19,6 +19,8 @@ from app.app.app_runtime import AppRuntime
 from app.app.backend_factory import BackendFactory
 from app.app.checkpointer_factory import CheckpointerFactory, get_checkpointer_factory
 from app.app.langchain_util import LangChainUtil
+from app.app.memory_middleware import MemoryInjectionMiddleware
+from app.app.memory_tools import build_memory_tools
 from app.app.policy_middleware import PolicyMiddleware
 from app.core.config import settings
 from app.core.error_code import ErrorCode
@@ -43,6 +45,7 @@ from app.db.schema import TbApp, TbAppSkill, TbAppTool, TbMcpServer, TbSkill, Tb
 from app.db.session import SessionLocal
 from app.model.open_model import AgentRunRequest
 from app.service.app_log_service import ZERO_USAGE, AppLogService
+from app.service.memory_service import MemoryService
 from app.service.policy_service import PolicyAuditWriter
 from app.service.skill_service import RESERVED_SKILL_NAMES
 
@@ -462,6 +465,25 @@ class AgentApp:
         # 主 agent 只挂应用直接绑定的工具；技能工具随技能 subagent 懒加载，
         # 避免所有技能的工具 schema 从第一轮就挤占主 agent 上下文。
         tools, tool_metadata = self._build_app_tools_with_metadata(db, req.app_id)
+        # 记忆工具（remember / forget / list_my_memories）：随主 agent 走，
+        # 不进 PolicyMiddleware 治理（中间件按 name 找不到 tool_id 会透传）。
+        thread_id_int = int(req.thread_id) if req.thread_id else None
+        memory_service = MemoryService(SnowflakeGenerator(settings.snowflake_worker_id))
+        memory_tools = build_memory_tools(
+            user_id=req_ctx.user_id,
+            app_id=app.id,
+            conversation_id=thread_id_int,
+            service=memory_service,
+            langchain_util=self._langchain_util,
+        )
+        logger.info(
+            "[memory] tools wired count=%d user_id=%s app_id=%s",
+            len(memory_tools),
+            req_ctx.user_id,
+            app.id,
+        )
+        if memory_tools:
+            tools = list(tools) + memory_tools
         system_prompt = (app_config.get("system_prompt") or "").strip()
         backend = self._backend_factory.create(app_config)
 
@@ -487,17 +509,29 @@ class AgentApp:
         if use_checkpoint:
             agent_kwargs["checkpointer"] = self._checkpointer_factory.get()
 
-        # 工具治理中间件：主 agent + 每个技能 subagent 都各挂一份，确保技能内调用也走治理。
-        # subagent 的中间件实例在 _build_skill_subagents 里按 skill 工具子集构建。
+        # 主 agent 中间件链：
+        #   - PolicyMiddleware：治理 user-bound 工具的调用（subagent 工具治理由
+        #     _build_skill_subagents 单独挂；framework 内置工具透传）。
+        #   - MemoryInjectionMiddleware：每次模型调用前把当前 user + app 维度的长期记忆
+        #     注入 system prompt 末尾；subagent 第一版不注入，避免污染技能行为。
+        main_middlewares: list[Any] = []
         if tool_metadata["name_to_id"]:
-            agent_kwargs["middleware"] = [
+            main_middlewares.append(
                 self._make_policy_middleware(
                     tool_metadata=tool_metadata,
                     req=req,
                     req_ctx=req_ctx,
                     app_id=app.id,
                 )
-            ]
+            )
+        main_middlewares.append(
+            MemoryInjectionMiddleware(
+                user_id=req_ctx.user_id,
+                app_id=app.id,
+                service=memory_service,
+            )
+        )
+        agent_kwargs["middleware"] = main_middlewares
         agent = create_deep_agent(**agent_kwargs)
         payload: dict[str, Any] = {
             "messages": [message.model_dump() for message in req.messages],

@@ -116,6 +116,15 @@ const router = createRouter({
           component: () => import("@/views/MockFeatureView.vue"),
         },
         {
+          path: "memory",
+          name: "memory",
+          meta: {
+            title: "长期记忆",
+            menu: { title: "长期记忆", icon: "bulb", order: 5.5 },
+          },
+          component: () => import("@/views/memory/MemoryView.vue"),
+        },
+        {
           path: "observability",
           name: "observability",
           meta: {

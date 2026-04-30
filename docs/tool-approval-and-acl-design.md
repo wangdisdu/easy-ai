@@ -227,15 +227,15 @@ DSL 的**唯一存储与传输形态**是结构化 JSON AST。前端表单生成
 
 ### 6.1 阶段总览
 
-| 阶段 | 主题 | 前置依赖 | 预估工作量 |
-|---|---|---|---|
-| **P0** | 声明式 ACL 基础 | 无 | ~6.5 人日 |
-| **P1** | 原生 HITL 对话内确认 | P0；Session 长会话已落地（已交付）| ~5 人日 |
-| **合计** | | | **~11.5 人日（约 2 周冲刺）** |
+| 阶段 | 主题 | 前置依赖 | 预估工作量 | 状态 |
+|---|---|---|---|---|
+| **P0** | 声明式 ACL 基础 | 无 | ~6.5 人日 | ✅ 已交付（G1–G4） |
+| **P1** | 原生 HITL 对话内确认 | P0；Session 长会话（已交付）| ~5 人日 | ✅ 已交付（G6–G8） |
+| **P0+** | 上线前补丁 | P0 | ~3 人日 | ⏳ 见 §6.4 |
 
-### 6.2 P0 ACL 基础（生产前必须）
+### 6.2 P0 ACL 基础（生产前必须）✅ 全部交付
 
-#### PR-G1：数据模型与 ORM（1 人日）
+#### PR-G1：数据模型与 ORM（1 人日）✅
 
 - alembic 迁移 `0005_tool_governance.py`：建 `tb_tool_policy` / `tb_tool_audit` 两张表（字段见 §3）
 - `app/db/schema.py`：对应 ORM
@@ -244,7 +244,7 @@ DSL 的**唯一存储与传输形态**是结构化 JSON AST。前端表单生成
 
 **出货门禁**：`make db-upgrade` 干净通过；ORM 导入冒烟；存量 `tb_tool.risk_level` 全量非空。
 
-#### PR-G2：DSL 解析器（1.5 人日）
+#### PR-G2：DSL 解析器（1.5 人日）✅
 
 - 新模块 `app/app/policy_dsl.py`
 - 支持算子见 §5.2，AST 节点见 §5.1
@@ -253,7 +253,7 @@ DSL 的**唯一存储与传输形态**是结构化 JSON AST。前端表单生成
 
 **出货门禁**：100% 行覆盖；所有错误条件返回 false（不抛异常）。
 
-#### PR-G3：PolicyMiddleware 骨架（1.5 人日）
+#### PR-G3：PolicyMiddleware 骨架（1.5 人日）✅
 
 - 新模块 `app/app/policy_middleware.py`，继承 LangGraph `AgentMiddleware`
 - 实现 `before_tool` hook，按 §4 流程
@@ -264,7 +264,7 @@ DSL 的**唯一存储与传输形态**是结构化 JSON AST。前端表单生成
 
 **出货门禁**：mock 工具下 deny 拒绝 / shadow 不拒绝 / allow 透传分别验证；audit 落库。
 
-#### PR-G4：策略 CRUD API + 前端表单编辑（2.5 人日）
+#### PR-G4：策略 CRUD API + 前端表单编辑（2.5 人日）✅
 
 **后端**：
 - API `/api/v1/tool/{id}/policy` GET/PUT；接收 JSON DSL（YAML 仅 API 调用方 / CI / 迁移脚本可用，UI 不暴露）
@@ -293,9 +293,9 @@ DSL 的**唯一存储与传输形态**是结构化 JSON AST。前端表单生成
 - 版本切换 UI 可读，能 diff
 - 表单生成的 DSL 和后端解析结果对账一致（自动化测试覆盖）
 
-### 6.3 P1 原生 HITL（依赖 Session）
+### 6.3 P1 原生 HITL（依赖 Session）✅ 全部交付
 
-#### PR-G6：interrupt + SSE 协议（2 人日）
+#### PR-G6：interrupt + SSE 协议（2 人日）✅
 
 - `PolicyMiddleware` 第二、三步：`risk_level >= MED` → `langgraph.interrupt(reason=..., tool_input=...)`
 - `agent_app.stream()` 检测 `__interrupt__` 事件 → SSE 推 `tool_hitl_required`，载荷含 tool_name / 参数 / 触发原因 / hitl_id（=tool_call_id）
@@ -306,41 +306,111 @@ DSL 的**唯一存储与传输形态**是结构化 JSON AST。前端表单生成
 
 **出货门禁**：完整 confirm 路径走通；modify 路径修改参数后调原工具；reject 路径 agent 拿到 `UserRejected` 错误。
 
-#### PR-G7：前端 HITL 确认面板（2 人日）
+#### PR-G7：前端 HITL 确认面板（2 人日）✅
 
 - 新组件 `HitlConfirmCard.vue`：内嵌在聊天泡泡，**不弹窗**
 - 展示：tool name、参数（可编辑）、触发规则原因、风险等级（颜色区分）
 - 三个动作按钮：确认 / 修改后确认 / 拒绝；调对应 `respond` 端点
 - 提交后展示等待状态，新 SSE 接续渲染
+- 卡片底部进度条按 deadline 实时缩短；剩余 ≤ 10s 显示倒计时徽标
+- 倒计时归零自动触发 reject（兜住"agent 后台跑、用户面前死寂"的体验断点）
+- confirm / modify / reject / timeout 后在原位留一行短痕迹（resolved trail），下条新消息或会话刷新清空
 
 **出货门禁**：3 种用户响应 UI 走通；网络断线后续流恢复确认面板状态。
 
-#### PR-G8：HITL 超时（1 人日）
+#### PR-G8：HITL 超时（1 人日）✅
 
-- 入参 `tool.hitl_timeout_seconds`（默认 300）
-- 服务端在创建 hitl 时记录 deadline；定时任务扫超时未响应的 hitl_id → 调用 `respond(reject)` 续跑
-- audit 写 `hitl_timeout`
-- 跨进程安全：用 `pg_try_advisory_lock(<hitl_id 的 hash>)` 互斥，避免多 worker 重复触发
+- 入参 `tb_tool.hitl_timeout_seconds`（默认 `settings.hitl_timeout_seconds=300`）
+- `HitlTimeoutWorker`：30s 一扫 `tb_tool_audit`，找已过 deadline 且无后续响应的 `hitl_required` 行
+- 抢 `pg_try_advisory_lock(audit_id)` 互斥后写 `hitl_timeout` 审计、调 `respond_hitl_stream(reject)` 续跑
+- 陈旧行（会话已删 / checkpoint 已清）走 INFO 日志优雅跳过，不打 traceback
+- 前端到点也会自己发 reject（用户在场场景下立即续跑给体验）；服务端 worker 是关闭页面 / 失焦兜底
 
-**出货门禁**：手动设 timeout=10s，不响应 → 10s 后 agent 自动收到拒绝。
+**出货门禁**：手动设 timeout=15s，不响应 → 15s 内前端自动 reject；关页面后 worker 兜底。
 
-### 6.4 优先级与并行度
+### 6.4 上线前补丁（P0+ 待办）
+
+P0/P1 功能已交付且可演示，但下面这几项是设计文档"出货门禁"明确要求或运行期能正确性需要的，留作上线前 sprint 处理。按上线阻塞性排序：
+
+#### PR-G9：策略 PUT 鉴权（~0.5 人日）🔒
+
+- 当前 `PUT /api/v1/tool/{id}/policy` 任何登录用户均可改任意工具的策略——**真正的安全缺口**
+- 校验 `tool.owner_user_id` 或调用方所属角色含 `app.admin_role`
+- 失败抛 `FORBIDDEN`，前端落"无权修改该工具策略"提示
+- 同步 `PolicyAuditWriter` 写一条 `policy_modified` 含 `actor_user_id` / 旧版本 id / 新版本 id
+
+**出货门禁**：普通账号 PUT 报 403；admin 账号正常生效；audit 留有变更记录。
+
+#### PR-G10：user_role 接入运行期 ACL（~0.5 人日）🧩
+
+- 当前 `PolicyMiddleware` 构造时 `user_role=None`，DSL 里 `user.role IN [...]` 永远命中不到
+- `RequestContext` 增加 `user_role` 字段（从 JWT claim 或 `tb_user_role` 解析）
+- `agent_app._make_policy_middleware` 透传 `req_ctx.user_role`
+- 同时把 `user.role` 暴露到 ACL 编辑器变量下拉
+
+**出货门禁**：写一条 `user.role IN ['admin']` 规则，admin 用户命中 / 其他用户不命中、行为各异。
+
+#### PR-G11：单测 / 集成测试（~2 人日）🧪
+
+设计 §7 出货门禁要求 ≥ 80% 覆盖率，目前没满足：
+
+- `policy_dsl.py`：把现有手工的 44 个用例落到 `tests/test_policy_dsl.py`，覆盖所有算子 + 缺失值 + 类型不匹配分支
+- `policy_middleware.py`：mock `ToolCallRequest` + 假 audit writer，验证 allow/deny/shadow/require_hitl 五条决策路径 + skill subagent 路径
+- `policy_service.py`：版本快照（superseded_by_id）逻辑
+- `hitl_timeout_worker.py`：fake clock + 假 audit 数据，验证 SQL 查询、advisory lock 互斥、ServiceError 优雅跳过
+- 一组端到端集成测试：mock 工具 + 调 agent.invoke，覆盖"deny 拒绝 / shadow 透传 / require_hitl interrupt + resume"
+
+**出货门禁**：`make test` 行覆盖率 ≥ 80%；CI 必跑这些用例。
+
+#### PR-G12：dry-run 全局开关（~0.5 人日）
+
+- 设计 §2.1 提到的全局演练模式：`settings.policy_dry_run=True` 时所有 `active` 策略降级为 `shadow` 行为
+- `PolicyMiddleware._should_block` 在该开关打开时一律返回 `False`，但仍写审计
+- 用途：上线一周整库 shadow 跑数据；或紧急回滚时一键关阻断
+- 不替代 per-policy `mode=shadow`（粒度不同）
+
+**出货门禁**：开关切换不需重启即生效（每次工具调用都读 settings）；审计可观察"如果切回 active 会拦多少调用"。
+
+#### PR-G13：PII 脱敏规则可配置化（~0.5 人日，可拆为更小）
+
+- 当前 `PolicyAuditWriter._redact()` 硬编码 `password / passwd / secret / token / api_key / apikey / authorization` 7 个关键字
+- 设计期想要按"工具 parameters schema 标注 + 全局规则表"两层
+- v1：从 `settings.policy_redact_keys` 读取额外关键字（list of substrings）
+- v2（更后期）：tool schema 里某字段标 `"x-pii": true` → 该字段值在 audit 里强制脱敏
+
+**出货门禁**：在 settings 加一个新关键字，audit 里相关参数被 `***` 替换。
+
+### 6.5 暂未规划（P2+，本期不做）
+
+记录下来避免重复讨论，遇到具体业务诉求再排：
+
+- **拖拽排序 priority**：当前数字 input 已能满足；UI 增量
+- **OR / Not 复合 AST 节点**：v1 仅 `And`，多条规则按 priority 串就够；语义增强
+- **量化配额**（session/user/app/cost 多维度上限）：单独的 PR-Q 系列；与 ACL 不冲突
+- **工具组级策略**：当前单工具粒度；批量管理需求出现再做
+- **策略变更 diff 视图**：版本快照已有，缺的是 UI 比对
+
+### 6.6 优先级与并行度
 
 ```
-                  P0（必做）
+                  P0（已交付）
                       │
               PR-G1 → G2 → G3 → G4
                             │
                             ▼
-                    P1 原生 HITL
+                  P1 原生 HITL（已交付）
                   PR-G6 → G7 → G8
+                            │
+                            ▼
+                  P0+ 上线前补丁（待办）
+                G9（鉴权）+ G10（user_role）│ G11（测试） │ G12（dry-run） │ G13（PII）
 ```
 
-**关键路径**：PR-G1 → G2 → G3 → G6 → G7。
-**并行机会**：G4（CRUD/UI）可与 G3 部分并行。
-**预计**：单人 ~1.5 周完成 P0，~1 周完成 P1，合计 ~2.5 周。
+**关键路径**（上线前）：G9 + G10 → G11。
+**并行机会**：G12 / G13 与上面三项独立。
+**预计**：单人 ~3 人日补完上线前补丁；P2+ 视业务需求增量排。
 
-### 6.5 灰度策略
+### 6.7 灰度策略
 
 | 阶段 | 策略 |
 |---|---|
