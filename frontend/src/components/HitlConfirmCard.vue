@@ -21,9 +21,9 @@
         <span class="hitl-label">工具</span>
         <span class="hitl-value hitl-mono">{{ payload.tool_name }}</span>
       </div>
-      <div v-if="payload.reason" class="hitl-row">
+      <div v-if="friendlyReason" class="hitl-row">
         <span class="hitl-label">原因</span>
-        <span class="hitl-value">{{ payload.reason }}</span>
+        <span class="hitl-value">{{ friendlyReason }}</span>
       </div>
       <div v-if="hasParams || editing" class="hitl-row hitl-row--block">
         <div class="hitl-label-row">
@@ -120,6 +120,7 @@ export interface HitlPayload {
   tool_name: string;
   parameters?: Record<string, unknown>;
   reason?: string | null;
+  reason_code?: string | null;
   risk_level?: string;
   matched_rule_id?: string | null;
   timeout_seconds?: number;
@@ -153,6 +154,19 @@ const paramsText = computed(() => {
 });
 
 const riskLevel = computed(() => (props.payload.risk_level || "low").toLowerCase());
+
+const REASON_CODE_LABELS: Record<string, string> = {
+  default_risk_high:   "该工具被标记为高风险，执行前需要人工确认",
+  default_risk_medium: "该工具被标记为中风险，执行前需要人工确认",
+  rule_match:          "触发了访问控制策略，执行前需要人工确认",
+};
+
+const friendlyReason = computed(() => {
+  const code = props.payload.reason_code;
+  if (code && REASON_CODE_LABELS[code]) return REASON_CODE_LABELS[code];
+  // 兜底：reason_code 不存在（旧版后端）或未覆盖时展示原始 reason
+  return props.payload.reason ?? "";
+});
 
 const riskLabel = computed(() => {
   switch (riskLevel.value) {

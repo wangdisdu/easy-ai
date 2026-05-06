@@ -110,3 +110,9 @@ class RagRunRequest(BaseModel):
     app_id: int = 0
     query: str
     variables: dict[str, Any] = Field(default_factory=dict)
+
+
+class AppTestHitlRespondReq(BaseModel):
+    thread_id: str
+    action: str  # "confirm" | "modify" | "reject"
+    parameters: dict[str, Any] | None = None

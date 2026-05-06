@@ -439,20 +439,36 @@
               <div class="tl-body">
                 <div class="msg-card msg-card--tool">
                   <div class="msg-header">
-                    <span class="msg-type-badge msg-type-badge--tool">{{ msgTypeLabel.tool }}</span>
+                    <span class="msg-type-badge msg-type-badge--tool">{{ isSubagentTask(tc.name, tc.arguments) ? "子代理" : msgTypeLabel.tool }}</span>
                     <span class="msg-tool-status">
-                      <a-spin v-if="tc.status === 'running'" size="small" />
-                      <span v-else class="msg-tool-status-done">done</span>
+                      <a-spin v-if="tc.status === 'running' || tc.status === 'subagent_hitl'" size="small" />
+                      <span v-else class="msg-tool-status-done">{{ tc.status === "error" ? "error" : "done" }}</span>
                     </span>
                   </div>
                   <div class="msg-tool-calls">
                     <div class="msg-tool-call">
-                      <span class="msg-tool-name">{{ tc.name }}</span>
+                      <span class="msg-tool-name">{{ toolDisplayIcon(tc.name, tc.arguments) }} {{ toolDisplayName(tc.name, tc.arguments) }}</span>
                       <pre v-if="tc.arguments && Object.keys(tc.arguments).length" class="msg-tool-args">{{ stringifyJson(tc.arguments) }}</pre>
                     </div>
                   </div>
                   <div v-if="tc.result" class="msg-content msg-content--tool-result">{{ truncateToolResult(tc.result, 500) }}</div>
                 </div>
+              </div>
+            </div>
+
+            <!-- HITL 确认卡片 -->
+            <div v-if="pendingHitl" class="tl-item">
+              <div class="tl-rail">
+                <span class="tl-dot tl-dot--hitl" />
+                <span class="tl-line" />
+              </div>
+              <div class="tl-body">
+                <HitlConfirmCard
+                  :payload="pendingHitl"
+                  :busy="hitlBusy"
+                  @respond="onHitlRespond"
+                  @timeout="hitlTimeoutFlag = true"
+                />
               </div>
             </div>
 
@@ -587,7 +603,7 @@
                   </div>
                   <div v-if="msg.toolCalls && msg.toolCalls.length" class="msg-tool-calls">
                     <div v-for="(tc, ti) in msg.toolCalls" :key="ti" class="msg-tool-call">
-                      <span class="msg-tool-name">{{ tc.name }}</span>
+                      <span class="msg-tool-name">{{ toolDisplayIcon(tc.name, tc.args) }} {{ toolDisplayName(tc.name, tc.args) }}</span>
                       <pre class="msg-tool-args">{{ stringifyJson(tc.args) }}</pre>
                     </div>
                   </div>
@@ -611,9 +627,11 @@ import { message } from "ant-design-vue";
 import { marked } from "marked";
 import * as appApi from "@/api/app";
 import * as llmApi from "@/api/llm";
+import type { HitlAction } from "@/api/conversation";
 import type { AppLogResp, AppResp, AppVersionResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
 import { formatMs } from "@/utils/time";
+import HitlConfirmCard, { type HitlPayload } from "@/components/HitlConfirmCard.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -637,7 +655,7 @@ const publishForm = reactive({ version: "", version_note: "" });
 interface StreamingToolCall {
   tool_call_id: string;
   name: string;
-  status: "running" | "done";
+  status: "running" | "done" | "error" | "subagent_hitl";
   arguments?: Record<string, unknown>;
   result?: string;
 }
@@ -651,6 +669,10 @@ const streamingContent = ref("");
 const streamingToolCalls = ref<StreamingToolCall[]>([]);
 const streamAbort = ref<{ abort: () => void } | null>(null);
 const userMessageText = ref("");
+const pendingHitl = ref<HitlPayload | null>(null);
+const hitlBusy = ref(false);
+const currentThreadId = ref<string | null>(null);
+let hitlTimeoutFlag = false;
 const streamMeta = reactive<{ model: string; latency_ms: number | null; tokenUsage: TokenUsage | null }>({
   model: "",
   latency_ms: null,
@@ -665,6 +687,14 @@ const msgTypeLabel: Record<string, string> = {
   tool: "工具",
   system: "系统",
 };
+
+// ── 工具展示工具函数（共享 composable） ──
+import {
+  isSubagentTask,
+  toolDisplayName,
+  toolDisplayIcon,
+  isSubagentHitlStatus,
+} from "@/composables/useToolDisplay";
 
 interface ParsedMessage {
   type: string;
@@ -977,12 +1007,17 @@ function resetStreamState() {
   streamMeta.latency_ms = null;
   streamMeta.tokenUsage = null;
   streamAbort.value = null;
+  pendingHitl.value = null;
+  hitlBusy.value = false;
+  currentThreadId.value = null;
+  hitlTimeoutFlag = false;
 }
 
 function handleStreamEvent(evt: SSEEvent) {
   switch (evt.event) {
     case "metadata":
       streamMeta.model = (evt.data.model as string) || "";
+      if (evt.data.thread_id) currentThreadId.value = evt.data.thread_id as string;
       break;
     case "token":
       streamingContent.value += (evt.data.content as string) || "";
@@ -999,11 +1034,15 @@ function handleStreamEvent(evt: SSEEvent) {
       const id = evt.data.tool_call_id as string;
       const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
       if (tc) {
-        tc.status = "done";
-        tc.result = (evt.data.result as string) || "";
+        const evtStatus = (evt.data.status as string) || "";
+        tc.status = evtStatus === "error" ? "error" : evtStatus === "subagent_hitl" ? "subagent_hitl" : "done";
+        tc.result = isSubagentHitlStatus(evtStatus) ? "" : (evt.data.result as string) || "";
       }
       break;
     }
+    case "tool_hitl_required":
+      pendingHitl.value = evt.data as unknown as HitlPayload;
+      break;
     case "message_complete":
       streamMeta.tokenUsage = (evt.data.usage as TokenUsage) ?? null;
       break;
@@ -1016,10 +1055,47 @@ function handleStreamEvent(evt: SSEEvent) {
   }
 }
 
+function onHitlRespond(action: HitlAction, parameters?: Record<string, unknown>) {
+  if (!pendingHitl.value || !currentThreadId.value || !app.value) return;
+  if (hitlBusy.value) return;
+  hitlBusy.value = true;
+  isStreaming.value = true;
+  const hitlId = pendingHitl.value.hitl_id;
+  hitlTimeoutFlag = false;
+  const tc = streamingToolCalls.value.find(
+    (t) => t.tool_call_id === pendingHitl.value?.tool_call_id,
+  );
+  if (tc) tc.status = "done";
+  pendingHitl.value = null;
+  streamAbort.value = appApi.testAppHitlRespondStream(
+    app.value.id,
+    hitlId,
+    {
+      thread_id: currentThreadId.value,
+      action,
+      parameters: action === "modify" ? parameters : undefined,
+    },
+    {
+      onEvent: handleStreamEvent,
+      onDone() {
+        isStreaming.value = false;
+        hitlBusy.value = false;
+      },
+      onError(err) {
+        message.error(err.message || "续跑失败");
+        isStreaming.value = false;
+        hitlBusy.value = false;
+      },
+    },
+  );
+}
+
 function onStopStream() {
   streamAbort.value?.abort();
   streamAbort.value = null;
   isStreaming.value = false;
+  pendingHitl.value = null;
+  hitlBusy.value = false;
 }
 
 function truncateToolResult(text: string, max = 200): string {
@@ -1385,6 +1461,7 @@ onMounted(() => {
 .tl-dot--human  { border-color: #2563eb; background: rgba(37, 99, 235, 0.15); }
 .tl-dot--ai     { border-color: #8b5cf6; background: rgba(139, 92, 246, 0.15); }
 .tl-dot--tool   { border-color: #f59e0b; background: rgba(245, 158, 11, 0.15); }
+.tl-dot--hitl   { border-color: #ef4444; background: rgba(239, 68, 68, 0.15); }
 .tl-dot--system { border-color: #64748b; background: rgba(100, 116, 139, 0.15); }
 .tl-dot--done   { border-color: #10b981; background: rgba(16, 185, 129, 0.15); }
 

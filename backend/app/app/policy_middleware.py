@@ -271,6 +271,14 @@ class PolicyMiddleware(AgentMiddleware):
             if override is not None and override > 0:
                 timeout_s = override
         deadline_ms = int(time.time() * 1000) + timeout_s * 1000
+        risk_lower = str(risk).lower()
+        # reason_code：给前端做展示映射用的枚举值，与 reason（调试/日志用）分离。
+        if decision.matched_rule_id is not None:
+            reason_code = "rule_match"
+        elif risk_lower in ("high", "medium"):
+            reason_code = f"default_risk_{risk_lower}"
+        else:
+            reason_code = "require_hitl"
         return {
             # type 字段是 SSE 推给前端的鉴别器；resume 端点也按它校验
             "type": "tool_hitl_required",
@@ -281,7 +289,8 @@ class PolicyMiddleware(AgentMiddleware):
             "tool_name": tool_name,
             "parameters": params,
             "reason": decision.reason or "require_hitl",
-            "risk_level": str(risk).lower(),
+            "reason_code": reason_code,
+            "risk_level": risk_lower,
             "matched_rule_id": (
                 str(decision.matched_rule_id) if decision.matched_rule_id else None
             ),

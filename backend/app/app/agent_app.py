@@ -11,7 +11,8 @@ import httpx
 from deepagents import create_deep_agent
 from langfuse import propagate_attributes
 from langfuse.langchain import CallbackHandler
-from langgraph.types import Command
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command, Interrupt
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -50,6 +51,35 @@ from app.service.policy_service import PolicyAuditWriter
 from app.service.skill_service import RESERVED_SKILL_NAMES
 
 logger = logging.getLogger(__name__)
+
+
+def _thread_id_to_int(thread_id: str | None) -> int | None:
+    """Snowflake thread_id → int；UUID 形式（测试流）→ None。"""
+    if not thread_id:
+        return None
+    try:
+        return int(thread_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_subagent_hitl_interrupt(error: Any) -> bool:
+    """子代理内部的 PolicyMiddleware 触发了 interrupt()，GraphInterrupt 向上冒泡。
+
+    区分普通工具报错：args[0] 是 Interrupt 元组且首个 Interrupt 的 value.type 为
+    tool_hitl_required。
+    """
+    if not isinstance(error, GraphInterrupt) or not error.args:
+        return False
+    interrupts = error.args[0]
+    if not isinstance(interrupts, tuple):
+        return False
+    return any(
+        isinstance(i, Interrupt)
+        and isinstance(getattr(i, "value", None), dict)
+        and i.value.get("type") == "tool_hitl_required"
+        for i in interrupts
+    )
 
 
 def _serialize_todos(todos: Any) -> list[dict[str, str]]:
@@ -379,23 +409,33 @@ class AgentApp:
                     elif kind == "on_tool_error":
                         run_id = event.get("run_id", "")
                         tool_name = event.get("name", "")
+                        error = data.get("error")
+                        subagent_hitl = _is_subagent_hitl_interrupt(error)
                         if run_id in tool_call_starts:
                             _, t0 = tool_call_starts.pop(run_id)
                             elapsed = time.perf_counter() - t0
-                            logger.warning(
-                                "[stream] thread=%s tool_error name=%s elapsed=%.2fs error=%s",
-                                prep.thread_id,
-                                tool_name,
-                                elapsed,
-                                data.get("error"),
-                            )
+                            if subagent_hitl:
+                                logger.info(
+                                    "[stream] thread=%s tool_end name=%s elapsed=%.2fs (subagent hitl)",
+                                    prep.thread_id,
+                                    tool_name,
+                                    elapsed,
+                                )
+                            else:
+                                logger.warning(
+                                    "[stream] thread=%s tool_error name=%s elapsed=%.2fs error=%s",
+                                    prep.thread_id,
+                                    tool_name,
+                                    elapsed,
+                                    error,
+                                )
                         yield format_sse_event(
                             SSE_EVENT_TOOL_CALL_END,
                             {
                                 "tool_call_id": run_id,
                                 "name": tool_name,
-                                "result": str(data.get("error", "")),
-                                "status": "error",
+                                "result": "" if subagent_hitl else str(error or ""),
+                                "status": "subagent_hitl" if subagent_hitl else "error",
                             },
                         )
 
@@ -467,7 +507,7 @@ class AgentApp:
         tools, tool_metadata = self._build_app_tools_with_metadata(db, req.app_id)
         # 记忆工具（remember / forget / list_my_memories）：随主 agent 走，
         # 不进 PolicyMiddleware 治理（中间件按 name 找不到 tool_id 会透传）。
-        thread_id_int = int(req.thread_id) if req.thread_id else None
+        thread_id_int = _thread_id_to_int(req.thread_id)
         memory_service = MemoryService(SnowflakeGenerator(settings.snowflake_worker_id))
         memory_tools = build_memory_tools(
             user_id=req_ctx.user_id,
@@ -759,7 +799,7 @@ class AgentApp:
                 matched_rule_int = int(matched_rule_raw)
             except (TypeError, ValueError):
                 matched_rule_int = None
-        conv_id = int(prep.thread_id) if prep.thread_id else None
+        conv_id = _thread_id_to_int(prep.thread_id)
         params = payload.get("parameters")
         if not isinstance(params, dict):
             params = {}
@@ -805,7 +845,7 @@ class AgentApp:
             hitl_timeout_by_tool_id=tool_metadata.get("id_to_hitl_timeout") or {},
             default_hitl_timeout_seconds=settings.hitl_timeout_seconds,
             run_id=req.thread_id,
-            conversation_id=int(req.thread_id) if req.thread_id else None,
+            conversation_id=_thread_id_to_int(req.thread_id),
             user_id=req_ctx.user_id,
             app_id=app_id,
             # user_role 暂未统一在 RequestContext 上挂载，留空；后续合规 PR 再补。

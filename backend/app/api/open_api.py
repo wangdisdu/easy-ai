@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.db.session import SessionLocal, get_db
 from app.model.open_model import (
     AgentRunRequest,
     AppRunReq,
+    AppTestHitlRespondReq,
     AppTestReq,
     LlmAppRunReq,
     RagRunRequest,
@@ -82,6 +84,41 @@ async def test_app_stream(
     return sse_response(generator)
 
 
+@router.post("/{app_id}/test/hitl/{hitl_id}/respond")
+async def test_app_hitl_respond(
+    app_id: int,
+    hitl_id: str,
+    req: AppTestHitlRespondReq,
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> StreamingResponse:
+    """测试流专用 HITL 响应端点，不依赖 TbConversation 记录。
+
+    body: {"thread_id": "...", "action": "confirm"|"modify"|"reject", "parameters": {...}?}
+    返回 SSE 流，与 send_message_stream 形态一致。
+    """
+    db = SessionLocal()
+    try:
+        agent_req = AgentRunRequest(
+            app_id=app_id,
+            thread_id=req.thread_id,
+            use_checkpoint=True,
+        )
+        hitl_response: dict[str, Any] = {"action": req.action}
+        if req.parameters is not None:
+            hitl_response["parameters"] = req.parameters
+        generator = agent_app.resume_stream(
+            db=db,
+            req=agent_req,
+            req_ctx=req_ctx,
+            hitl_response=hitl_response,
+            request_type="test",
+        )
+    except Exception:
+        db.close()
+        raise
+    return sse_response(generator)
+
+
 def _dispatch_stream(
     *,
     db: Session,
@@ -102,7 +139,15 @@ def _dispatch_stream(
         return llm_app.stream(db=db, req=llm_req, req_ctx=req_ctx, request_type=request_type)
 
     if app.app_type == "agent":
-        agent_req = AgentRunRequest(app_id=app_id, messages=req.messages, variables=req.variables)
+        # 测试流需要 checkpoint 以支持 HITL（interrupt 需要持久化恢复点）
+        thread_id = str(uuid.uuid4()) if is_test else None
+        agent_req = AgentRunRequest(
+            app_id=app_id,
+            messages=req.messages,
+            variables=req.variables,
+            thread_id=thread_id,
+            use_checkpoint=is_test,
+        )
         return agent_app.stream(db=db, req=agent_req, req_ctx=req_ctx, request_type=request_type)
 
     db.close()

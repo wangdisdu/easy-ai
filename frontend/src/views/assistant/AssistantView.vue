@@ -119,8 +119,8 @@
                   class="chat-tool-inline"
                 >
                   <div class="chat-tool-row" @click="toggleToolExpand(tool.id || `${ti}-${tIdx}`)">
-                    <span class="chat-tool-icon">🔧</span>
-                    <span class="chat-tool-name">{{ (tool.metadata as Record<string, unknown>)?.tool_name || "工具调用" }}</span>
+                    <span class="chat-tool-icon">{{ toolDisplayIcon((tool.metadata as Record<string, unknown>)?.tool_name as string, (tool.metadata as Record<string, unknown>)?.arguments as Record<string, unknown> | undefined) }}</span>
+                    <span class="chat-tool-name">{{ toolDisplayName((tool.metadata as Record<string, unknown>)?.tool_name as string, (tool.metadata as Record<string, unknown>)?.arguments as Record<string, unknown> | undefined) }}</span>
                     <span :class="[(tool.metadata as Record<string, unknown>)?.status === 'error' ? 'chat-tool-error' : 'chat-tool-done']">
                       {{ (tool.metadata as Record<string, unknown>)?.status === 'error' ? 'error' : 'done' }}
                     </span>
@@ -173,9 +173,9 @@
                 class="chat-tool-inline"
               >
                 <div class="chat-tool-row" @click="tc._expanded = !tc._expanded">
-                  <span class="chat-tool-icon">🔧</span>
-                  <span class="chat-tool-name">{{ tc.name }}</span>
-                  <a-spin v-if="tc.status === 'running'" size="small" />
+                  <span class="chat-tool-icon">{{ toolDisplayIcon(tc.name, tc.arguments) }}</span>
+                  <span class="chat-tool-name">{{ toolDisplayName(tc.name, tc.arguments) }}</span>
+                  <a-spin v-if="tc.status === 'running' || tc.status === 'subagent_hitl'" size="small" />
                   <template v-else>
                     <span :class="tc.status === 'error' ? 'chat-tool-error' : 'chat-tool-done'">{{ tc.status === 'error' ? 'error' : 'done' }}</span>
                     <RightOutlined :class="['chat-tool-chevron', tc._expanded ? 'chat-tool-chevron--open' : '']" />
@@ -240,7 +240,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, reactive } from "vue";
+import { computed, nextTick, onMounted, ref, reactive, watch } from "vue";
 import {
   PlusOutlined,
   DownOutlined,
@@ -250,7 +250,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
-import { marked } from "marked";
+import { renderMarkdown, runMermaid } from "@/composables/useMarkdown";
 import * as convApi from "@/api/conversation";
 import * as appApi from "@/api/app";
 import type { AppResp, ConversationResp, ConversationMessageResp } from "@/api/types";
@@ -273,7 +273,7 @@ const chatContainer = ref<HTMLElement | null>(null);
 interface StreamingToolCall {
   tool_call_id: string;
   name: string;
-  status: "running" | "success" | "error";
+  status: "running" | "success" | "error" | "subagent_hitl";
   arguments?: Record<string, unknown>;
   result?: string;
   _expanded?: boolean;
@@ -326,6 +326,14 @@ const streamMeta = reactive<{ model: string; sources: string[]; usage: Record<st
   usage: null,
   latency_ms: null,
 });
+
+// ── 工具展示工具函数（共享 composable） ──
+import {
+  isSubagentTask,
+  toolDisplayName,
+  toolDisplayIcon,
+  isSubagentHitlStatus,
+} from "@/composables/useToolDisplay";
 
 // 应用选择器
 const showAppPicker = ref(false);
@@ -404,10 +412,6 @@ const messageTurns = computed<MessageTurn[]>(() => {
 });
 
 // ── 工具函数 ──
-
-function renderMarkdown(text: string): string {
-  return marked(text) as string;
-}
 
 function formatRelativeTime(ms: number): string {
   const now = Date.now();
@@ -610,8 +614,9 @@ function buildStreamHandlers() {
           const id = evt.data.tool_call_id as string;
           const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
           if (tc) {
-            tc.status = (evt.data.status as string) === "error" ? "error" : "success";
-            tc.result = (evt.data.result as string) || "";
+            const evtStatus = (evt.data.status as string) || "";
+            tc.status = evtStatus === "error" ? "error" : evtStatus === "subagent_hitl" ? "subagent_hitl" : "success";
+            tc.result = isSubagentHitlStatus(evtStatus) ? "" : (evt.data.result as string) || "";
           }
           break;
         }
@@ -713,6 +718,12 @@ const vClickOutside = {
     document.removeEventListener("click", (el as HTMLElement & { _clickOutside: (e: Event) => void })._clickOutside);
   },
 };
+
+// ── Mermaid 渲染触发 ──
+// 历史消息加载/更新后渲染：flush:"post" 保证在 Vue 完成 DOM 更新后才执行
+watch(messages, () => runMermaid(chatContainer.value), { flush: "post" });
+// 流式结束后渲染（streaming content 里的 mermaid 块）
+watch(isStreaming, (val) => { if (!val) runMermaid(chatContainer.value); }, { flush: "post" });
 
 // ── 初始化 ──
 
@@ -1338,5 +1349,39 @@ onMounted(async () => {
   margin-top: 8px;
   font-size: 10px;
   color: #cbd5e1;
+}
+
+/* ── Mermaid 流程图 ── */
+
+/* 容器：与 pre/code 块视觉对齐，留出上下间距 */
+.chat-bubble--ai :deep(.mermaid-diagram) {
+  margin: 8px 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: #fafbfc;
+  min-height: 40px;
+}
+
+/* 渲染前占位提示（data-processed 由 runMermaid 写入） */
+.chat-bubble--ai :deep(.mermaid-diagram:not([data-processed]))::before {
+  content: "正在渲染流程图…";
+  display: block;
+  padding: 12px 16px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* 渲染后：SVG 居中展示 */
+.chat-bubble--ai :deep(.mermaid-diagram[data-processed]) {
+  display: flex;
+  justify-content: center;
+  padding: 20px 16px;
+  background: #ffffff;
+}
+
+.chat-bubble--ai :deep(.mermaid-diagram[data-processed] svg) {
+  max-width: 100%;
+  height: auto;
 }
 </style>

@@ -106,3 +106,27 @@ export function testAppStream(
   });
   return { abort: () => controller.abort() };
 }
+
+export interface TestHitlRespondBody {
+  thread_id: string;
+  action: string;
+  parameters?: Record<string, unknown>;
+}
+
+export function testAppHitlRespondStream(
+  appId: string,
+  hitlId: string,
+  body: TestHitlRespondBody,
+  options: Omit<SSEOptions, "signal">,
+): { abort: () => void } {
+  const controller = new AbortController();
+  fetchSSE(
+    `/api/v1/open/app/${appId}/test/hitl/${hitlId}/respond`,
+    body as unknown as Record<string, unknown>,
+    { ...options, signal: controller.signal },
+  ).catch((err: unknown) => {
+    if (err instanceof Error && err.name === "AbortError") return;
+    options.onError?.(err instanceof Error ? err : new Error(String(err)));
+  });
+  return { abort: () => controller.abort() };
+}
