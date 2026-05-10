@@ -32,6 +32,6 @@ const pageTitle = computed(() => {
 
 .mock-desc {
   margin: 0;
-  color: rgba(0, 0, 0, 0.6);
+  color: var(--color-text-secondary);
 }
 </style>

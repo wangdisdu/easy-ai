@@ -55,13 +55,13 @@ function onTabChange(tab: string) {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .setting-sub {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .setting-tabs :deep(.ant-tabs-nav) {
@@ -69,26 +69,26 @@ function onTabChange(tab: string) {
 }
 
 .setting-tabs :deep(.ant-tabs-nav::before) {
-  border-bottom-color: rgba(148, 163, 184, 0.16);
+  border-bottom-color: var(--surface-divider);
 }
 
 .setting-tabs :deep(.ant-tabs-tab) {
   padding: 10px 4px 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   font-weight: 500;
 }
 
 .setting-tabs :deep(.ant-tabs-tab:hover) {
-  color: #334155;
+  color: var(--color-text-secondary);
 }
 
 .setting-tabs :deep(.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
-  color: #1677ff;
+  color: var(--color-primary);
 }
 
 .setting-tabs :deep(.ant-tabs-ink-bar) {
   height: 3px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #1677ff 0%, #7c3aed 100%);
+  background: var(--gradient-brand-horizontal);
 }
 </style>

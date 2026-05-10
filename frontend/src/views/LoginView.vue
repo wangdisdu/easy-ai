@@ -112,6 +112,14 @@ async function onSubmit() {
 </script>
 
 <style scoped>
+/**
+ * 登录页是故意保持的「永远深色玻璃风」营销 / 品牌页，不参与全局亮 / 暗主题切换：
+ * - 它在登录前展示，用户尚未到达可切换主题的界面
+ * - 整页大量径向光晕、磨砂叠层、扫描线等装饰效果没有有意义的浅色等价物
+ * 因此本文件已在 .stylelintrc.json 的 ignoreFiles 中豁免硬编码颜色规则。
+ * 改动样式时请保持「深色 only」的设计语义。
+ */
+
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap");
 
 .login-view {

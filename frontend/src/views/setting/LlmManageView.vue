@@ -558,14 +558,10 @@ async function onDeleteModel(model: LlmModelResp) {
 }
 
 .llm-provider-card {
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--surface-card-border);
   border-radius: 16px;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.92) 0%,
-    rgba(248, 250, 252, 0.82) 100%
-  );
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  background: var(--surface-card-bg);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
@@ -580,7 +576,7 @@ async function onDeleteModel(model: LlmModelResp) {
 }
 
 .llm-provider-header:hover {
-  background: rgba(248, 250, 252, 0.8);
+  background: var(--surface-muted-hover);
 }
 
 .llm-status-dot {
@@ -591,17 +587,17 @@ async function onDeleteModel(model: LlmModelResp) {
 }
 
 .llm-dot--connected {
-  background: #10b981;
-  box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);
+  background: var(--color-success);
+  box-shadow: 0 0 6px var(--color-success-border);
 }
 
 .llm-dot--error {
-  background: #ef4444;
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+  background: var(--color-error);
+  box-shadow: 0 0 6px var(--color-error-border);
 }
 
 .llm-dot--unconfigured {
-  background: #94a3b8;
+  background: var(--color-text-quaternary);
 }
 
 .llm-provider-info {
@@ -619,14 +615,14 @@ async function onDeleteModel(model: LlmModelResp) {
 .llm-provider-name {
   font-size: 15px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .llm-provider-url {
   display: block;
   margin-top: 2px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   font-family: "SF Mono", "Fira Code", monospace;
 }
 
@@ -637,7 +633,7 @@ async function onDeleteModel(model: LlmModelResp) {
 }
 
 .llm-expand-icon {
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   font-size: 12px;
   transition: transform 0.2s;
 }
@@ -648,7 +644,7 @@ async function onDeleteModel(model: LlmModelResp) {
 
 /* ── Detail ── */
 .llm-provider-detail {
-  border-top: 1px solid rgba(226, 232, 240, 0.6);
+  border-top: 1px solid var(--color-border);
   padding: 20px;
 }
 
@@ -658,7 +654,7 @@ async function onDeleteModel(model: LlmModelResp) {
   justify-content: space-between;
   font-size: 12px;
   font-weight: 600;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 12px;
@@ -701,7 +697,7 @@ async function onDeleteModel(model: LlmModelResp) {
 
 .llm-predefined-label {
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   white-space: nowrap;
 }
 
@@ -709,6 +705,6 @@ async function onDeleteModel(model: LlmModelResp) {
   height: 48px;
   border-radius: 14px;
   font-size: 14px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 </style>

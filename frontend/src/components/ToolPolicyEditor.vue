@@ -367,8 +367,8 @@ const astPreview = computed(() => {
 }
 
 .policy-version {
-  background: #e2e8f0;
-  color: #475569;
+  background: var(--color-neutral-bg);
+  color: var(--color-text-secondary);
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
@@ -377,12 +377,12 @@ const astPreview = computed(() => {
 
 .policy-mode-label {
   font-size: 13px;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .policy-hint {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   margin: 0;
   line-height: 1.6;
 }
@@ -397,13 +397,13 @@ const astPreview = computed(() => {
 }
 
 .rule-card {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #fafafa;
+  background: var(--surface-subtle);
 }
 
 .rule-card-header {
@@ -414,7 +414,7 @@ const astPreview = computed(() => {
 
 .rule-index {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text);
 }
 
 .rule-row {
@@ -426,13 +426,13 @@ const astPreview = computed(() => {
 .rule-label {
   display: inline-block;
   width: 72px;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-size: 13px;
 }
 
 .rule-hint {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 .rule-between-row,
@@ -443,27 +443,27 @@ const astPreview = computed(() => {
 }
 
 .rule-between-sep {
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 .advanced {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 8px 12px;
-  background: #fff;
+  background: var(--color-bg-elevated);
 }
 
 .advanced summary {
   cursor: pointer;
   font-size: 13px;
-  color: #475569;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
 .advanced-pre {
   margin: 8px 0 0;
   padding: 8px;
-  background: #f8fafc;
+  background: var(--surface-subtle);
   border-radius: 4px;
   font-size: 12px;
   max-height: 280px;
@@ -476,6 +476,6 @@ const astPreview = computed(() => {
   justify-content: flex-end;
   gap: 8px;
   padding-top: 8px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--color-border);
 }
 </style>

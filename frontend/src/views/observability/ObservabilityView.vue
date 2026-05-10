@@ -426,7 +426,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  background: #f6f8fb;
+  background: var(--surface-subtle);
   min-height: 100%;
 }
 
@@ -453,29 +453,29 @@ onMounted(() => {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  background: #fff;
-  border: 1px solid rgba(226, 232, 240, 0.9);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   font-size: 12px;
-  color: #475569;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  color: var(--color-text-secondary);
+  box-shadow: var(--shadow-card-sm);
 }
 
 .obs-range-badge :deep(svg) {
-  color: #3b82f6;
+  color: var(--color-info);
 }
 
 .obs-title {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
   letter-spacing: -0.01em;
 }
 
 .obs-sub {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 /* 核心指标卡 */
@@ -492,9 +492,9 @@ onMounted(() => {
   gap: 14px;
   padding: 20px 22px;
   border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(226, 232, 240, 0.85);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
   transition: transform 0.2s, box-shadow 0.2s;
 }
@@ -510,7 +510,7 @@ onMounted(() => {
 
 .stat-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.06), 0 12px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow-elevated);
 }
 
 .stat-icon {
@@ -535,7 +535,7 @@ onMounted(() => {
 
 .stat-label {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   font-weight: 500;
 }
 
@@ -553,7 +553,7 @@ onMounted(() => {
   display: block;
   margin-top: 4px;
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 /* 双栏布局 */
@@ -566,9 +566,9 @@ onMounted(() => {
 .panel-card {
   padding: 20px 22px;
   border-radius: 16px;
-  background: #fff;
-  border: 1px solid rgba(226, 232, 240, 0.85);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
 }
 
 .panel-head {
@@ -578,21 +578,21 @@ onMounted(() => {
   gap: 16px;
   margin-bottom: 16px;
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .panel-title {
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
   letter-spacing: -0.01em;
 }
 
 .panel-sub {
   margin: 2px 0 0;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 .panel-legend {
@@ -600,7 +600,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 12px;
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .legend-item {
@@ -623,7 +623,7 @@ onMounted(() => {
   gap: 12px;
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 1px solid rgba(226, 232, 240, 0.8);
+  border-top: 1px solid var(--color-border);
 }
 
 .trend-summary-item {
@@ -632,7 +632,7 @@ onMounted(() => {
 
 .trend-summary-name {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   margin-bottom: 2px;
   white-space: nowrap;
   overflow: hidden;
@@ -641,7 +641,7 @@ onMounted(() => {
 
 .trend-summary-val {
   font-size: 13px;
-  color: #1e293b;
+  color: var(--color-text);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -668,18 +668,18 @@ onMounted(() => {
 
 .model-name {
   flex: 1;
-  color: #1e293b;
+  color: var(--color-text);
 }
 
 .model-tokens {
   font-variant-numeric: tabular-nums;
-  color: #1e293b;
+  color: var(--color-text);
   font-weight: 600;
 }
 
 .model-cost {
   font-variant-numeric: tabular-nums;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   font-size: 11px;
   width: 36px;
   text-align: right;
@@ -694,33 +694,33 @@ onMounted(() => {
   border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
-  background: rgba(148, 163, 184, 0.16);
-  color: #475569;
+  background: var(--surface-divider);
+  color: var(--color-text-secondary);
 }
 
 .type-tag--llm {
-  background: rgba(16, 185, 129, 0.14);
-  color: #047857;
+  background: var(--color-success-bg-strong);
+  color: var(--color-success-text);
 }
 
 .type-tag--rag {
-  background: rgba(37, 99, 235, 0.14);
-  color: #1d4ed8;
+  background: var(--color-info-bg-strong);
+  color: var(--color-info-strong);
 }
 
 .type-tag--nl2sql {
-  background: rgba(6, 182, 212, 0.14);
-  color: #0e7490;
+  background: var(--color-cyan-bg);
+  color: var(--color-cyan-text);
 }
 
 .type-tag--agent {
-  background: rgba(139, 92, 246, 0.14);
-  color: #6d28d9;
+  background: var(--color-violet-bg-strong);
+  color: var(--color-accent);
 }
 
 .type-tag--agent_flow {
-  background: rgba(245, 158, 11, 0.14);
-  color: #b45309;
+  background: var(--color-warning-bg-strong);
+  color: var(--color-warning-text);
 }
 
 /* 排序按钮 */
@@ -732,7 +732,7 @@ onMounted(() => {
 .sort-tab {
   padding: 4px 10px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -741,12 +741,12 @@ onMounted(() => {
 }
 
 .sort-tab:hover {
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .sort-tab--active {
-  background: rgba(37, 99, 235, 0.1);
-  color: #1d4ed8;
+  background: var(--color-info-bg);
+  color: var(--color-info-strong);
   font-weight: 600;
 }
 
@@ -766,14 +766,14 @@ onMounted(() => {
 }
 
 .error-app {
-  color: #1e293b;
+  color: var(--color-text);
   font-weight: 600;
   margin-right: 8px;
 }
 
 .error-bar {
   height: 6px;
-  background: rgba(226, 232, 240, 0.8);
+  background: var(--color-border);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -792,32 +792,32 @@ onMounted(() => {
 }
 
 .error-top {
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .error-count {
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   font-variant-numeric: tabular-nums;
 }
 
 /* 数值颜色 */
 .val-good {
-  color: #047857;
+  color: var(--color-success-text);
   font-variant-numeric: tabular-nums;
 }
 
 .val-warn {
-  color: #b45309;
+  color: var(--color-warning-text);
   font-variant-numeric: tabular-nums;
 }
 
 .val-error {
-  color: #b91c1c;
+  color: var(--color-error-text);
   font-variant-numeric: tabular-nums;
 }
 
 .val-muted {
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 .mono {
@@ -826,28 +826,28 @@ onMounted(() => {
 }
 
 .preview-cell {
-  color: #475569;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
 :deep(.ant-table-tbody > tr.ant-table-row:hover > td) {
-  background: rgba(241, 245, 249, 0.7);
+  background: var(--color-split);
 }
 
 :deep(.ant-table-thead > tr > th) {
-  background: rgba(248, 250, 252, 0.6);
+  background: var(--surface-muted);
   font-size: 11px;
   font-weight: 600;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+  border-bottom: 1px solid var(--color-border);
 }
 
 :deep(.ant-table-tbody > tr > td) {
   font-size: 13px;
-  color: #1e293b;
-  border-bottom: 1px solid rgba(241, 245, 249, 0.85);
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-split);
 }
 
 :deep(.ant-empty) {

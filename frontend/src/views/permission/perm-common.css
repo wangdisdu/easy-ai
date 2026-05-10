@@ -2,13 +2,10 @@
 
 /* ── Glass card ── */
 .perm-card {
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--surface-card-border);
   border-radius: 20px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.82) 100%);
-  box-shadow:
-    0 20px 40px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  background: var(--surface-card-bg);
+  box-shadow: var(--surface-card-shadow);
   backdrop-filter: blur(12px);
 }
 
@@ -28,18 +25,18 @@
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .perm-card-sub {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .perm-card-count {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .perm-btn {
@@ -79,7 +76,7 @@
   border: 1px solid transparent;
   border-left: 3px solid transparent;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.42);
+  background: var(--surface-soft);
   padding: 16px 14px;
   text-align: left;
   cursor: pointer;
@@ -99,7 +96,7 @@
 .perm-list-item-name {
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .perm-list-item-code {
@@ -112,7 +109,7 @@
   margin: 10px 0 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 /* ── Detail area ── */
@@ -151,13 +148,13 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .perm-detail-title {
   margin: 0;
   font-size: 24px;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .perm-detail-pill {
@@ -173,7 +170,7 @@
 .perm-detail-sub {
   margin: 10px 0 0;
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .perm-detail-actions {
@@ -187,8 +184,8 @@
   justify-content: center;
   min-height: 120px;
   border-radius: 16px;
-  background: rgba(248, 250, 252, 0.72);
-  color: #64748b;
+  background: var(--surface-muted);
+  color: var(--color-text-tertiary);
   font-size: 13px;
 }
 
@@ -206,8 +203,8 @@
   gap: 12px;
   padding: 14px 16px;
   border-radius: 16px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid var(--color-border);
+  background: var(--surface-strong);
 }
 
 .perm-member-main {
@@ -238,13 +235,13 @@
 .perm-member-name {
   font-size: 14px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .perm-member-sub,
 .perm-member-contact {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .perm-member-actions {
@@ -257,24 +254,24 @@
 .perm-table :deep(.ant-table) {
   border-radius: 18px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--surface-strong);
 }
 
 .perm-table :deep(.ant-table-thead > tr > th) {
-  background: rgba(248, 250, 252, 0.88);
-  color: #64748b;
+  background: var(--surface-muted-hover);
+  color: var(--color-text-tertiary);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  border-bottom-color: rgba(226, 232, 240, 0.9);
+  border-bottom-color: var(--color-border);
 }
 
 .perm-table :deep(.ant-table-tbody > tr > td) {
-  border-bottom-color: rgba(241, 245, 249, 0.95);
+  border-bottom-color: var(--color-split);
 }
 
 .perm-table :deep(.ant-table-tbody > tr:hover > td) {
-  background: rgba(248, 250, 252, 0.86);
+  background: var(--surface-muted-hover);
 }
 
 .perm-table :deep(.ant-pagination) {
@@ -290,11 +287,11 @@
 }
 
 .perm-grid-item {
-  border: 1px solid rgba(226, 232, 240, 0.95);
+  border: 1px solid var(--color-border);
   border-radius: 14px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.84);
-  color: #475569;
+  background: var(--surface-strong);
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -302,11 +299,11 @@
 }
 
 .perm-grid-item--active {
-  border-color: rgba(37, 99, 235, 0.24);
-  background: linear-gradient(135deg, rgba(219, 234, 254, 0.88) 0%, rgba(239, 246, 255, 0.9) 100%);
-  color: #1d4ed8;
+  border-color: var(--color-info-bg-strong);
+  background: var(--surface-info-soft);
+  color: var(--color-info-strong);
   font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.12);
+  box-shadow: inset 0 0 0 1px var(--color-info-bg);
 }
 
 .perm-grid-mark {
@@ -317,15 +314,15 @@
   height: 24px;
   padding: 0 8px;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.14);
-  color: #64748b;
+  background: var(--color-neutral-bg);
+  color: var(--color-text-tertiary);
   font-size: 11px;
   font-weight: 700;
 }
 
 .perm-grid-item--active .perm-grid-mark {
-  background: #2563eb;
-  color: #fff;
+  background: var(--color-info-strong);
+  color: var(--color-text-inverse);
 }
 
 /* ── Responsive ── */

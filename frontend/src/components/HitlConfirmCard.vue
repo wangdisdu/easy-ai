@@ -275,9 +275,9 @@ function onAction(action: HitlAction) {
 
 <style scoped>
 .hitl-card {
-  border: 1px solid #fde68a;
+  border: 1px solid var(--color-warning-bg-strong);
   border-radius: 12px;
-  background: #fffbeb;
+  background: var(--color-warning-bg);
   padding: 12px 14px;
   margin-top: 8px;
   font-size: 13px;
@@ -289,13 +289,13 @@ function onAction(action: HitlAction) {
 }
 
 .hitl-card--medium {
-  border-color: #facc15;
-  background: #fefce8;
+  border-color: var(--color-warning);
+  background: var(--color-warning-bg);
 }
 
 .hitl-card--high {
-  border-color: #ef4444;
-  background: #fef2f2;
+  border-color: var(--color-error);
+  background: var(--color-error-bg);
 }
 
 .hitl-card-head {
@@ -309,28 +309,28 @@ function onAction(action: HitlAction) {
 }
 
 .hitl-card-icon--low {
-  color: #047857;
+  color: var(--color-success-text);
 }
 
 .hitl-card-icon--medium {
-  color: #ca8a04;
+  color: var(--color-warning-strong);
 }
 
 .hitl-card-icon--high {
-  color: #dc2626;
+  color: var(--color-error-strong);
 }
 
 .hitl-card-title {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text);
 }
 
 .hitl-card--medium .hitl-card-title {
-  color: #854d0e;
+  color: var(--color-warning-text);
 }
 
 .hitl-card--high .hitl-card-title {
-  color: #b91c1c;
+  color: var(--color-error-text);
 }
 
 .hitl-card-risk {
@@ -341,18 +341,18 @@ function onAction(action: HitlAction) {
 }
 
 .hitl-card-risk--medium {
-  background: #fef9c3;
-  color: #854d0e;
+  background: var(--color-warning-bg-strong);
+  color: var(--color-warning-text);
 }
 
 .hitl-card-risk--high {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--color-error-bg-strong);
+  color: var(--color-error-text);
 }
 
 .hitl-card-risk--low {
-  background: #d1fae5;
-  color: #047857;
+  background: var(--color-success-bg-strong);
+  color: var(--color-success-text);
 }
 
 .hitl-countdown {
@@ -362,8 +362,8 @@ function onAction(action: HitlAction) {
   gap: 4px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--color-error-bg-strong);
+  color: var(--color-error-text);
   font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -395,13 +395,13 @@ function onAction(action: HitlAction) {
 
 .hitl-label {
   flex: 0 0 auto;
-  color: #6b7280;
+  color: var(--color-text-tertiary);
   font-size: 12px;
   min-width: 36px;
 }
 
 .hitl-value {
-  color: #111827;
+  color: var(--color-text);
   word-break: break-word;
   flex: 1;
 }
@@ -412,8 +412,8 @@ function onAction(action: HitlAction) {
 }
 
 .hitl-params {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 8px 10px;
   margin: 0;
@@ -421,7 +421,7 @@ function onAction(action: HitlAction) {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #1f2937;
+  color: var(--color-text);
   max-height: 240px;
   overflow: auto;
 }
@@ -432,7 +432,7 @@ function onAction(action: HitlAction) {
 }
 
 .hitl-error {
-  color: #b91c1c;
+  color: var(--color-error-text);
   font-size: 12px;
 }
 
@@ -446,7 +446,7 @@ function onAction(action: HitlAction) {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #b91c1c;
+  color: var(--color-error-text);
   font-size: 12px;
   font-weight: 500;
 }
@@ -459,7 +459,7 @@ function onAction(action: HitlAction) {
   right: 0;
   bottom: 0;
   height: 3px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--color-neutral-bg);
   overflow: hidden;
 }
 
@@ -469,14 +469,14 @@ function onAction(action: HitlAction) {
 }
 
 .hitl-progress-fill--low {
-  background: #10b981;
+  background: var(--color-success);
 }
 
 .hitl-progress-fill--medium {
-  background: #ca8a04;
+  background: var(--color-warning-strong);
 }
 
 .hitl-progress-fill--high {
-  background: #dc2626;
+  background: var(--color-error-strong);
 }
 </style>

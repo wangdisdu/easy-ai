@@ -37,7 +37,7 @@ const computedSegments = computed(() => {
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 100 100">
-    <circle cx="50" cy="50" :r="radius" fill="none" stroke="rgba(148,163,184,0.15)" stroke-width="8" />
+    <circle cx="50" cy="50" :r="radius" fill="none" stroke="var(--color-neutral-bg)" stroke-width="8" />
     <circle
       v-for="(seg, i) in computedSegments"
       :key="i"
@@ -52,9 +52,9 @@ const computedSegments = computed(() => {
       transform="rotate(-90 50 50)"
       stroke-linecap="round"
     />
-    <text x="50" y="48" text-anchor="middle" fill="#1e293b" font-size="13" font-weight="600">
+    <text x="50" y="48" text-anchor="middle" fill="var(--color-text)" font-size="13" font-weight="600">
       {{ total.toLocaleString() }}
     </text>
-    <text x="50" y="62" text-anchor="middle" fill="#94a3b8" font-size="7">总计</text>
+    <text x="50" y="62" text-anchor="middle" fill="var(--color-text-quaternary)" font-size="7">总计</text>
   </svg>
 </template>

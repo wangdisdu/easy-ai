@@ -80,8 +80,8 @@ function statusIcon(status: Todo["status"]): string {
   display: flex;
   flex-direction: column;
   width: 320px;
-  border-left: 1px solid #e2e8f0;
-  background: #fafafa;
+  border-left: 1px solid var(--color-border);
+  background: var(--surface-subtle);
   transition: width 0.2s ease;
   overflow: hidden;
 }
@@ -96,8 +96,8 @@ function statusIcon(status: Todo["status"]): string {
   align-items: center;
   gap: 8px;
   padding: 12px 14px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #fff;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
   user-select: none;
   flex-shrink: 0;
 }
@@ -115,7 +115,7 @@ function statusIcon(status: Todo["status"]): string {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text);
   flex: 1;
 }
 
@@ -125,9 +125,9 @@ function statusIcon(status: Todo["status"]): string {
 
 .todo-panel-progress {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
-  background: #f1f5f9;
+  background: var(--color-split);
   padding: 2px 8px;
   border-radius: 10px;
 }
@@ -135,14 +135,14 @@ function statusIcon(status: Todo["status"]): string {
 .todo-panel-toggle {
   border: none;
   background: transparent;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
   cursor: pointer;
   padding: 2px 4px;
   font-size: 12px;
 }
 
 .todo-panel-toggle:hover {
-  color: #1f2937;
+  color: var(--color-text);
 }
 
 .todo-panel-list {
@@ -165,7 +165,7 @@ function statusIcon(status: Todo["status"]): string {
 }
 
 .todo-item:hover {
-  background: #f1f5f9;
+  background: var(--color-split);
 }
 
 .todo-item-icon {
@@ -181,30 +181,30 @@ function statusIcon(status: Todo["status"]): string {
 }
 
 .todo-item--pending .todo-item-icon {
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 
 .todo-item--pending .todo-item-content {
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .todo-item--in_progress .todo-item-icon {
-  color: #2563eb;
+  color: var(--color-info-strong);
   animation: spin 1.4s linear infinite;
   display: inline-block;
 }
 
 .todo-item--in_progress .todo-item-content {
-  color: #1e3a8a;
+  color: var(--color-info-strong);
   font-weight: 500;
 }
 
 .todo-item--completed .todo-item-icon {
-  color: #16a34a;
+  color: var(--color-success-strong);
 }
 
 .todo-item--completed .todo-item-content {
-  color: #64748b;
+  color: var(--color-text-tertiary);
   text-decoration: line-through;
 }
 
@@ -226,7 +226,7 @@ function statusIcon(status: Todo["status"]): string {
     width: 100%;
     max-height: 50vh;
     border-left: none;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--color-border);
     z-index: 50;
   }
 

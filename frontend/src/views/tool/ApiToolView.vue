@@ -222,40 +222,40 @@ onMounted(() => {
 
 <style scoped>
 .tool-form-page {
-  border: 1px solid rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--surface-card-border);
   border-radius: 24px;
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.86) 100%);
-  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    radial-gradient(circle at top right, var(--color-info-bg), transparent 28%),
+    var(--surface-card-bg);
+  box-shadow: var(--surface-card-shadow);
   padding: 24px;
 }
 
 .form-header { display: flex; align-items: center; gap: 8px; }
-.form-title { margin: 0; font-size: 20px; font-weight: 700; color: #0f172a; }
+.form-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--color-text); }
 
 .source-label { margin-top: 14px; }
 .source-badge { display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-.source-badge--mcp { background: rgba(139, 92, 246, 0.1); color: #7c3aed; }
+.source-badge--mcp { background: var(--color-violet-bg); color: var(--color-accent); }
 
 .form-body { margin-top: 18px; }
 .form-main { max-width: 780px; }
-.form-card { padding: 24px; border: 1px solid rgba(226, 232, 240, 0.88); border-radius: 18px; background: rgba(255, 255, 255, 0.78); margin-bottom: 16px; }
-.form-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: #334155; margin-bottom: 6px; }
-.form-section-hint { font-size: 12px; color: #94a3b8; margin-bottom: 18px; line-height: 1.6; }
-.form-section-hint code { font-size: 11px; background: rgba(139, 92, 246, 0.08); color: #7c3aed; padding: 1px 5px; border-radius: 3px; }
+.form-card { padding: 24px; border: 1px solid var(--color-border); border-radius: 18px; background: var(--surface-strong); margin-bottom: 16px; }
+.form-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--color-text-secondary); margin-bottom: 6px; }
+.form-section-hint { font-size: 12px; color: var(--color-text-quaternary); margin-bottom: 18px; line-height: 1.6; }
+.form-section-hint code { font-size: 11px; background: var(--color-violet-bg); color: var(--color-accent); padding: 1px 5px; border-radius: 3px; }
 
 .badge { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
-.badge--visible { background: rgba(245, 158, 11, 0.1); color: #d97706; border: 1px solid rgba(245, 158, 11, 0.2); }
-.badge--hidden { background: rgba(148, 163, 184, 0.1); color: #64748b; border: 1px solid rgba(148, 163, 184, 0.2); }
+.badge--visible { background: var(--color-warning-bg); color: var(--color-warning-strong); border: 1px solid var(--color-warning-bg-strong); }
+.badge--hidden { background: var(--color-neutral-bg); color: var(--color-text-tertiary); border: 1px solid var(--color-neutral-bg); }
 
 .form-row { display: flex; gap: 16px; margin-bottom: 18px; }
 .form-row--top { align-items: flex-start; }
-.form-label { flex-shrink: 0; width: 100px; text-align: right; font-size: 13px; color: #475569; padding-top: 6px; }
-.required { color: #ef4444; margin-right: 2px; }
+.form-label { flex-shrink: 0; width: 100px; text-align: right; font-size: 13px; color: var(--color-text-secondary); padding-top: 6px; }
+.required { color: var(--color-error); margin-right: 2px; }
 .form-field { flex: 1; }
-.form-hint { margin: 5px 0 0; font-size: 12px; color: #94a3b8; line-height: 1.5; }
-.form-hint code { font-size: 11px; background: rgba(139, 92, 246, 0.08); color: #7c3aed; padding: 1px 5px; border-radius: 3px; }
+.form-hint { margin: 5px 0 0; font-size: 12px; color: var(--color-text-quaternary); line-height: 1.5; }
+.form-hint code { font-size: 11px; background: var(--color-violet-bg); color: var(--color-accent); padding: 1px 5px; border-radius: 3px; }
 .form-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 8px; }
 
 /* Key-Value list for headers */

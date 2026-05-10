@@ -1,0 +1,300 @@
+/**
+ * 主题颜色 token。
+ *
+ * 组件样式应使用这里的 CSS 变量而非硬编码颜色，主题切换由 :root[data-theme="dark"] 覆盖完成。
+ * 命名沿用 Ant Design 习惯，便于后续与 ConfigProvider token 对齐。
+ */
+
+:root {
+  /* ===== Brand ===== */
+  --color-primary: #1677ff;
+  --color-primary-hover: #4096ff;
+  --color-primary-active: #0958d9;
+  --color-accent: #7c3aed;
+
+  /* ===== Surface（背景层级，由低到高） ===== */
+  --color-bg-body: #f0f2f5;
+  --color-bg-layout: #f0f2f5;
+  --color-bg-container: #ffffff;
+  --color-bg-elevated: #ffffff;
+  --color-bg-header: #ffffff;
+  --color-bg-sider: #ffffff;
+  --color-bg-mask: rgba(15, 23, 42, 0.45);
+
+  /* ===== Text（文本，由强到弱） ===== */
+  --color-text: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-tertiary: #64748b;
+  --color-text-quaternary: #94a3b8;
+  --color-text-inverse: #ffffff;
+
+  /* ===== Border / Divider ===== */
+  --color-border: #e2e8f0;
+  --color-border-secondary: #cbd5e1;
+  --color-split: #f1f5f9;
+
+  /* ===== Semantic ===== */
+  --color-success: #10b981;
+  --color-success-strong: #059669;
+  --color-warning: #f59e0b;
+  --color-warning-strong: #d97706;
+  --color-error: #ef4444;
+  --color-error-strong: #dc2626;
+  --color-info: #3b82f6;
+  --color-info-strong: #2563eb;
+
+  /* ===== Glass / Overlay（侧栏渐变、玻璃拟态等场景常用） ===== */
+  --color-glass-bg: rgba(255, 255, 255, 0.72);
+  --color-glass-border: rgba(15, 23, 42, 0.08);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-elevated: 0 4px 16px rgba(15, 23, 42, 0.08), 0 12px 32px rgba(15, 23, 42, 0.10);
+
+  /* ===== Brand 渐变（内部用 --color-primary/--color-accent，自动跟随主题切换） ===== */
+  --gradient-brand-horizontal: linear-gradient(90deg, var(--color-primary) 0%, var(--color-accent) 100%);
+  --gradient-brand-vertical: linear-gradient(180deg, var(--color-primary) 0%, var(--color-accent) 100%);
+  --gradient-brand-corner: linear-gradient(135deg, var(--color-primary) 0%, var(--color-accent) 100%);
+
+  /* ===== Primary 半透明叠层（hover/selected/ghost border 等高频场景） ===== */
+  --color-primary-bg-soft: rgba(22, 119, 255, 0.05);
+  --color-primary-bg-hover: rgba(22, 119, 255, 0.08);
+  --color-primary-bg: rgba(22, 119, 255, 0.14);
+  --color-primary-bg-strong: rgba(22, 119, 255, 0.24);
+  --color-primary-glow: rgba(22, 119, 255, 0.28);
+
+  /* ===== Surface 层（侧栏 / 顶栏 / 内容区背景与阴影） ===== */
+  --surface-sider-bg: linear-gradient(180deg, rgba(241, 245, 255, 0.92) 0%, rgba(255, 255, 255, 1) 28%, rgba(248, 250, 255, 1) 100%);
+  --surface-sider-border: rgba(22, 119, 255, 0.08);
+  --surface-sider-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.8), 8px 0 24px rgba(15, 23, 42, 0.03);
+  --surface-header-bg: rgba(255, 255, 255, 0.78);
+  --surface-header-border: rgba(148, 163, 184, 0.14);
+  --surface-header-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  --surface-content-bg: rgb(249, 250, 253);
+  --surface-content-grid: rgba(59, 130, 246, 0.04);
+
+  /* ===== Header 内分隔线 / 头像旁可点击 pill ===== */
+  --surface-divider: rgba(148, 163, 184, 0.16);
+  --surface-trigger-bg: rgba(255, 255, 255, 0.46);
+  --surface-trigger-border: rgba(148, 163, 184, 0.14);
+  --surface-trigger-inset: rgba(255, 255, 255, 0.8);
+
+  /* ===== Glass card（卡片/面板，跨页面通用） ===== */
+  --surface-card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.82) 100%);
+  --surface-card-border: rgba(255, 255, 255, 0.7);
+  --surface-card-shadow: 0 20px 40px rgba(15, 23, 42, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+
+  /* ===== 半透明表面层级（列表项 / 行 / 单元格） ===== */
+  --surface-soft: rgba(255, 255, 255, 0.42);
+  --surface-strong: rgba(255, 255, 255, 0.84);
+
+  /* ===== Slate-50 类背景（占位 / 行 hover / 表头） ===== */
+  --surface-muted: rgba(248, 250, 252, 0.72);
+  --surface-muted-hover: rgba(248, 250, 252, 0.86);
+
+  /* ===== Info 半透明叠层（与 primary 区分的辅助蓝色，常用于「已选中/已启用」状态） ===== */
+  --color-info-bg: rgba(37, 99, 235, 0.12);
+  --color-info-bg-strong: rgba(37, 99, 235, 0.24);
+  --surface-info-soft: linear-gradient(135deg, rgba(219, 234, 254, 0.88) 0%, rgba(239, 246, 255, 0.9) 100%);
+
+  /* ===== 中性灰 chip（数字徽标 / 关闭态标签） ===== */
+  --color-neutral-bg: rgba(148, 163, 184, 0.14);
+
+  /* ===== 状态条/横幅 4 件套（success/warning/error）：bg = 横幅底，bg-strong = 同色 chip 底，border = 边框，text = 在 bg 上的暗色文本 ===== */
+  --color-success-bg: rgba(16, 185, 129, 0.10);
+  --color-success-bg-strong: rgba(16, 185, 129, 0.20);
+  --color-success-border: rgba(16, 185, 129, 0.40);
+  --color-success-text: #047857;
+
+  --color-warning-bg: rgba(245, 158, 11, 0.10);
+  --color-warning-bg-strong: rgba(245, 158, 11, 0.24);
+  --color-warning-border: rgba(245, 158, 11, 0.40);
+  --color-warning-text: #854d0e;
+
+  --color-error-bg: rgba(239, 68, 68, 0.10);
+  --color-error-bg-strong: rgba(239, 68, 68, 0.20);
+  --color-error-border: rgba(239, 68, 68, 0.40);
+  --color-error-text: #b91c1c;
+
+  /* ===== Subtle surface（比卡片再深一档的「次级面板」，常用于 pre/inset 区域和折叠面板底） ===== */
+  --surface-subtle: #f8fafc;
+
+  /* ===== Info 强调点缀（与 surface-info-soft 配合：角向头像渐变 / 选中卡片侧向渐变 / 选中卡片投影） ===== */
+  --gradient-info-corner: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
+  --surface-info-side: linear-gradient(90deg, rgba(219, 234, 254, 0.68) 0%, rgba(255, 255, 255, 0.7) 100%);
+  --shadow-info-drop: 0 14px 28px rgba(37, 99, 235, 0.08);
+
+  /* ===== Teal（与 primary/info 蓝色区分的第二品类色，用于「用户组」类目区别） ===== */
+  --color-teal-strong: #0f766e;
+  --color-teal-bg: rgba(20, 184, 166, 0.10);
+  --color-teal-border: rgba(13, 148, 136, 0.18);
+  --gradient-teal-corner: linear-gradient(135deg, #ccfbf1 0%, #5eead4 100%);
+  --surface-teal-soft: linear-gradient(90deg, rgba(204, 251, 241, 0.68) 0%, rgba(255, 255, 255, 0.7) 100%);
+  --shadow-teal-drop: 0 14px 28px rgba(13, 148, 136, 0.08);
+
+  /* ===== Cyan / Violet（应用类目区分用第三、四档色：data 类用 cyan，agent/AI 类用 violet） ===== */
+  --color-cyan-bg: rgba(6, 182, 212, 0.12);
+  --color-cyan-text: #0891b2;
+  --color-violet-bg: rgba(139, 92, 246, 0.12);
+  --color-violet-bg-strong: rgba(139, 92, 246, 0.24);
+
+  /* ===== Info border（与已有 success/warning/error border 4 件套对齐） ===== */
+  --color-info-border: rgba(37, 99, 235, 0.40);
+
+  /* ===== Code block surface（不跟主题反转：在亮模式是深色卡片，在暗模式比卡片更深的「inset」感） ===== */
+  --surface-code: #0f172a;
+  --color-code-text: #e2e8f0;
+
+  /* ===== Timeline 垂直辅助线（顶部清晰、底部淡出） ===== */
+  --surface-timeline-line: linear-gradient(180deg, rgba(203, 213, 225, 0.7) 0%, rgba(203, 213, 225, 0.2) 100%);
+
+  /* ===== 紧凑型 drop shadow（嵌套卡片 / 浮起的 hover 状态） ===== */
+  --shadow-card-sm: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+:root[data-theme="dark"] {
+  /* ===== Brand（暗色下主色稍亮，提升对比） ===== */
+  --color-primary: #4096ff;
+  --color-primary-hover: #69b1ff;
+  --color-primary-active: #1677ff;
+  --color-accent: #a78bfa;
+
+  /* ===== Surface（暗色下三档 elevation：body slate-900 → container slate-800 → elevated slate-700） ===== */
+  --color-bg-body: #0f172a;
+  --color-bg-layout: #0f172a;
+  --color-bg-container: #1e293b;
+  --color-bg-elevated: #334155;
+  --color-bg-header: #1e293b;
+  --color-bg-sider: #0f172a;
+  --color-bg-mask: rgba(0, 0, 0, 0.65);
+
+  /* ===== Text ===== */
+  --color-text: #f1f5f9;
+  --color-text-secondary: #cbd5e1;
+  --color-text-tertiary: #94a3b8;
+  --color-text-quaternary: #64748b;
+  --color-text-inverse: #0f172a;
+
+  /* ===== Border / Divider ===== */
+  --color-border: #334155;
+  --color-border-secondary: #475569;
+  --color-split: #1e293b;
+
+  /* ===== Semantic（暗色下整体提亮一档） ===== */
+  --color-success: #34d399;
+  --color-success-strong: #10b981;
+  --color-warning: #fbbf24;
+  --color-warning-strong: #f59e0b;
+  --color-error: #f87171;
+  --color-error-strong: #ef4444;
+  --color-info: #60a5fa;
+  --color-info-strong: #3b82f6;
+
+  /* ===== Glass / Overlay ===== */
+  --color-glass-bg: rgba(30, 41, 59, 0.72);
+  --color-glass-border: rgba(148, 163, 184, 0.12);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.36);
+  --shadow-elevated: 0 4px 16px rgba(0, 0, 0, 0.40), 0 12px 32px rgba(0, 0, 0, 0.48);
+
+  /* gradient-brand-* 不需要重写：内部 var() 在使用时按当前主题求值 */
+
+  /* ===== Primary 半透明叠层（暗色下提升透明度补偿对比） ===== */
+  --color-primary-bg-soft: rgba(64, 150, 255, 0.10);
+  --color-primary-bg-hover: rgba(64, 150, 255, 0.12);
+  --color-primary-bg: rgba(64, 150, 255, 0.18);
+  --color-primary-bg-strong: rgba(64, 150, 255, 0.30);
+  --color-primary-glow: rgba(64, 150, 255, 0.36);
+
+  /* ===== Surface 层 ===== */
+  --surface-sider-bg: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 1) 28%, rgba(15, 23, 42, 1) 100%);
+  --surface-sider-border: rgba(64, 150, 255, 0.10);
+  --surface-sider-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04), 8px 0 24px rgba(0, 0, 0, 0.32);
+  --surface-header-bg: rgba(30, 41, 59, 0.78);
+  --surface-header-border: rgba(148, 163, 184, 0.10);
+  --surface-header-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --surface-content-bg: rgb(15, 23, 42);
+  --surface-content-grid: rgba(96, 165, 250, 0.05);
+
+  /* ===== Header 内分隔线 / 可点击 pill ===== */
+  --surface-divider: rgba(148, 163, 184, 0.12);
+  --surface-trigger-bg: rgba(30, 41, 59, 0.40);
+  --surface-trigger-border: rgba(148, 163, 184, 0.10);
+  --surface-trigger-inset: rgba(255, 255, 255, 0.04);
+
+  /* ===== Glass card ===== */
+  --surface-card-bg: linear-gradient(180deg, rgba(30, 41, 59, 0.92) 0%, rgba(15, 23, 42, 0.82) 100%);
+  --surface-card-border: rgba(148, 163, 184, 0.10);
+  --surface-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.40), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  /* ===== 半透明表面层级（暗色下白色透明叠层观感大幅减弱，改用近黑灰带轻微透明） ===== */
+  --surface-soft: rgba(255, 255, 255, 0.04);
+  --surface-strong: rgba(255, 255, 255, 0.06);
+
+  /* ===== Slate-900 类背景（暗色下用近黑色叠层模拟「比卡片再深一档」的muted效果） ===== */
+  --surface-muted: rgba(15, 23, 42, 0.60);
+  --surface-muted-hover: rgba(15, 23, 42, 0.78);
+
+  /* ===== Info 半透明叠层（暗色提升透明度补偿对比） ===== */
+  --color-info-bg: rgba(96, 165, 250, 0.16);
+  --color-info-bg-strong: rgba(96, 165, 250, 0.32);
+  --surface-info-soft: linear-gradient(135deg, rgba(37, 99, 235, 0.20) 0%, rgba(96, 165, 250, 0.12) 100%);
+
+  --color-neutral-bg: rgba(148, 163, 184, 0.12);
+
+  /* ===== 状态条/横幅（暗色下提升透明度补偿对比，文本反向取较亮的浅色） ===== */
+  --color-success-bg: rgba(52, 211, 153, 0.16);
+  --color-success-bg-strong: rgba(52, 211, 153, 0.28);
+  --color-success-border: rgba(52, 211, 153, 0.40);
+  --color-success-text: #6ee7b7;
+
+  --color-warning-bg: rgba(251, 191, 36, 0.16);
+  --color-warning-bg-strong: rgba(251, 191, 36, 0.28);
+  --color-warning-border: rgba(251, 191, 36, 0.40);
+  --color-warning-text: #fde68a;
+
+  --color-error-bg: rgba(248, 113, 113, 0.16);
+  --color-error-bg-strong: rgba(248, 113, 113, 0.28);
+  --color-error-border: rgba(248, 113, 113, 0.40);
+  --color-error-text: #fca5a5;
+
+  /* ===== Subtle surface（暗色下与 body 等同，制造 inset 凹陷效果） ===== */
+  --surface-subtle: #0f172a;
+
+  /* ===== Info 强调点缀（暗色取较深蓝色 + 高对比） ===== */
+  --gradient-info-corner: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+  --surface-info-side: linear-gradient(90deg, rgba(37, 99, 235, 0.20) 0%, rgba(30, 41, 59, 0.6) 100%);
+  --shadow-info-drop: 0 14px 28px rgba(96, 165, 250, 0.16);
+
+  /* ===== Teal ===== */
+  --color-teal-strong: #5eead4;
+  --color-teal-bg: rgba(94, 234, 212, 0.16);
+  --color-teal-border: rgba(94, 234, 212, 0.30);
+  --gradient-teal-corner: linear-gradient(135deg, #134e4a 0%, #2dd4bf 100%);
+  --surface-teal-soft: linear-gradient(90deg, rgba(13, 148, 136, 0.20) 0%, rgba(30, 41, 59, 0.6) 100%);
+  --shadow-teal-drop: 0 14px 28px rgba(45, 212, 191, 0.16);
+
+  /* ===== Cyan / Violet（暗色取较亮变体，提升对比） ===== */
+  --color-cyan-bg: rgba(34, 211, 238, 0.18);
+  --color-cyan-text: #67e8f9;
+  --color-violet-bg: rgba(167, 139, 250, 0.18);
+  --color-violet-bg-strong: rgba(167, 139, 250, 0.32);
+
+  --color-info-border: rgba(96, 165, 250, 0.50);
+
+  /* ===== Code block（暗模式下取 slate-950 比卡片再深一档，制造 inset 感） ===== */
+  --surface-code: #020617;
+  --color-code-text: #cbd5e1;
+
+  /* ===== Timeline 辅助线（暗色用 slate-600 alpha） ===== */
+  --surface-timeline-line: linear-gradient(180deg, rgba(71, 85, 105, 0.70) 0%, rgba(71, 85, 105, 0.20) 100%);
+
+  --shadow-card-sm: 0 8px 18px rgba(0, 0, 0, 0.32);
+}
+
+/* 主题切换时为颜色相关属性加上短过渡，避免闪烁；不影响 transform/opacity 动画。 */
+html,
+body {
+  background-color: var(--color-bg-body);
+  color: var(--color-text);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}

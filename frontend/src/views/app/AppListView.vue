@@ -3,41 +3,42 @@
     <div class="app-page-head">
       <div>
         <h2 class="app-page-title">应用工厂</h2>
-        <p class="app-page-sub">基于模板快速创建 LLM / RAG / NL2SQL / Agent / Agent Flow 应用</p>
+        <p class="app-page-sub">
+          按应用类型分类管理 — 不同类型对应不同的能力与配置
+        </p>
       </div>
-      <a-button type="primary" class="app-head-btn" @click="router.push('/app/create')">
+      <a-button type="primary" class="app-head-btn" @click="onCreate">
         <template #icon><PlusOutlined /></template>
-        创建应用
+        创建{{ activeTypeMeta.label }}
       </a-button>
     </div>
+
+    <a-tabs v-model:activeKey="activeType" class="app-tabs" @change="onTabChange">
+      <a-tab-pane v-for="t in typeTabs" :key="t.value">
+        <template #tab>
+          <span class="app-tab-label">
+            <span :class="['app-tab-dot', `app-tab-dot--${t.value}`]" />
+            <span>{{ t.label }}</span>
+            <span class="app-tab-count">{{ t.count }}</span>
+          </span>
+        </template>
+      </a-tab-pane>
+    </a-tabs>
 
     <div class="filter-toolbar">
       <a-input-search
         v-model:value="keyword"
         class="search-input"
-        placeholder="搜索应用名称或描述..."
+        :placeholder="`搜索 ${activeTypeMeta.label} 应用...`"
         allow-clear
         @search="onSearch"
       />
       <div class="filter-row">
         <button
-          v-for="item in typeFilters"
-          :key="item.value"
-          type="button"
-          class="filter-chip"
-          :class="{ 'filter-chip--active': filterType === item.value }"
-          @click="selectTypeFilter(item.value)"
-        >
-          {{ item.label }} ({{ item.count }})
-        </button>
-      </div>
-
-      <div class="filter-row">
-        <button
           v-for="item in statusFilters"
           :key="item.value"
           type="button"
-          class="filter-chip filter-chip--soft"
+          class="filter-chip"
           :class="{ 'filter-chip--active': filterStatus === item.value }"
           @click="selectStatusFilter(item.value)"
         >
@@ -55,18 +56,13 @@
           @click="router.push(`/app/${app.id}`)"
         >
           <div class="app-card-top">
-            <span :class="['app-type-tag', `app-type--${app.app_type}`]">
-              {{ appTypeLabel[app.app_type] || app.app_type }}
-            </span>
-            <div class="app-card-top-right">
-              <div class="app-card-status">
-                <span :class="['app-status-dot', `app-status--${app.app_status}`]" />
-                <span class="app-status-text">{{ statusLabel[app.app_status] || app.app_status }}</span>
-              </div>
-              <a-popconfirm title="确定删除该应用？" @confirm="onDelete(app)">
-                <a-button type="text" size="small" danger @click.stop>删除</a-button>
-              </a-popconfirm>
+            <div class="app-card-status">
+              <span :class="['app-status-dot', `app-status--${app.app_status}`]" />
+              <span class="app-status-text">{{ statusLabel[app.app_status] || app.app_status }}</span>
             </div>
+            <a-popconfirm title="确定删除该应用？" @confirm="onDelete(app)">
+              <a-button type="text" size="small" danger @click.stop>删除</a-button>
+            </a-popconfirm>
           </div>
 
           <h4 class="app-card-name">{{ app.name }}</h4>
@@ -79,12 +75,19 @@
 
           <div class="app-card-footer">
             <span>创建于 {{ formatMs(app.create_time) }}</span>
-            <span class="app-card-calls">{{ statusLabel[app.app_status] || app.app_status }}</span>
           </div>
         </article>
       </div>
 
-      <a-empty v-else-if="!loading" description="没有找到匹配的应用" class="empty-block" />
+      <a-empty
+        v-else-if="!loading"
+        :description="`暂无 ${activeTypeMeta.label} 应用`"
+        class="empty-block"
+      >
+        <a-button type="primary" @click="onCreate">
+          创建第一个 {{ activeTypeMeta.label }}
+        </a-button>
+      </a-empty>
     </a-spin>
 
     <div v-if="total > pageSize" class="app-pagination">
@@ -111,8 +114,20 @@ import { formatMs } from "@/utils/time";
 
 const router = useRouter();
 
+type AppType = "agent" | "agent_flow" | "llm" | "rag" | "nl2sql";
+
+const TYPE_META: Record<AppType, { label: string }> = {
+  agent: { label: "Agent" },
+  agent_flow: { label: "Agent Flow" },
+  llm: { label: "LLM" },
+  rag: { label: "RAG" },
+  nl2sql: { label: "NL2SQL" },
+};
+
+const TYPE_ORDER: AppType[] = ["agent", "agent_flow", "llm", "rag", "nl2sql"];
+
+const activeType = ref<AppType>("agent");
 const keyword = ref("");
-const filterType = ref("");
 const filterStatus = ref("");
 const list = ref<AppResp[]>([]);
 const total = ref(0);
@@ -121,28 +136,21 @@ const pageNo = ref(1);
 const pageSize = ref(20);
 const countMap = ref<Record<string, number>>({});
 
-const appTypeLabel: Record<string, string> = {
-  llm: "LLM",
-  rag: "RAG",
-  nl2sql: "NL2SQL",
-  agent: "Agent",
-  agent_flow: "Agent Flow",
-};
-
 const statusLabel: Record<string, string> = {
   draft: "草稿",
   published: "已发布",
   offline: "已下线",
 };
 
-const typeFilters = computed(() => [
-  { label: "全部", value: "", count: total.value },
-  { label: "RAG", value: "rag", count: countMap.value.rag ?? 0 },
-  { label: "NL2SQL", value: "nl2sql", count: countMap.value.nl2sql ?? 0 },
-  { label: "LLM", value: "llm", count: countMap.value.llm ?? 0 },
-  { label: "Agent", value: "agent", count: countMap.value.agent ?? 0 },
-  { label: "Agent Flow", value: "agent_flow", count: countMap.value.agent_flow ?? 0 },
-]);
+const typeTabs = computed(() =>
+  TYPE_ORDER.map((value) => ({
+    value,
+    label: TYPE_META[value].label,
+    count: countMap.value[value] ?? 0,
+  }))
+);
+
+const activeTypeMeta = computed(() => TYPE_META[activeType.value]);
 
 const statusFilters = computed(() => [
   { label: "全部状态", value: "" },
@@ -167,7 +175,7 @@ async function loadList() {
       page_no: pageNo.value,
       page_size: pageSize.value,
       keyword: keyword.value || undefined,
-      app_type: filterType.value || undefined,
+      app_type: activeType.value,
       app_status: filterStatus.value || undefined,
     });
     list.value = data.data;
@@ -182,14 +190,21 @@ function onSearch() {
   void loadList();
 }
 
-function selectTypeFilter(value: string) {
-  filterType.value = value;
-  onSearch();
+/** 切换 tab：重置分页和状态过滤，但保留搜索词。 */
+function onTabChange() {
+  pageNo.value = 1;
+  filterStatus.value = "";
+  void loadList();
 }
 
 function selectStatusFilter(value: string) {
   filterStatus.value = value;
   onSearch();
+}
+
+/** 把当前 tab 的 type 通过 query 传给创建页（create 页若不读这个参数也不会出错）。 */
+function onCreate() {
+  router.push({ path: "/app/create", query: { type: activeType.value } });
 }
 
 async function onDelete(app: AppResp) {
@@ -205,34 +220,19 @@ onMounted(async () => {
 
 <style scoped>
 .app-page {
-  border: 1px solid rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--surface-card-border);
   border-radius: 24px;
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.86) 100%);
-  box-shadow:
-    0 24px 48px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    radial-gradient(circle at top right, var(--color-info-bg), transparent 28%),
+    var(--surface-card-bg);
+  box-shadow: var(--surface-card-shadow);
   padding: 24px;
 }
 
-.app-page-head,
-.app-card-top,
-.app-card-top-right,
-.app-card-status,
-.app-card-footer {
-  display: flex;
-  align-items: center;
-}
-
-.app-page-head,
-.app-card-top,
-.app-card-footer {
-  justify-content: space-between;
-}
-
 .app-page-head {
+  display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 16px;
 }
 
@@ -240,13 +240,13 @@ onMounted(async () => {
   margin: 0;
   font-size: 20px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .app-page-sub {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .app-head-btn {
@@ -255,8 +255,80 @@ onMounted(async () => {
   border-radius: 12px;
 }
 
+/* ── Tabs ── */
+.app-tabs {
+  margin-top: 16px;
+}
+
+.app-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 18px;
+}
+
+.app-tabs :deep(.ant-tabs-nav::before) {
+  border-bottom-color: var(--surface-divider);
+}
+
+.app-tabs :deep(.ant-tabs-tab) {
+  padding: 10px 4px 12px;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+}
+
+.app-tabs :deep(.ant-tabs-tab:hover) {
+  color: var(--color-text-secondary);
+}
+
+.app-tabs :deep(.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.app-tabs :deep(.ant-tabs-ink-bar) {
+  height: 3px;
+  border-radius: 999px;
+  background: var(--gradient-brand-horizontal);
+}
+
+.app-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-tab-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.app-tab-dot--agent { background: var(--color-accent); }
+.app-tab-dot--agent_flow { background: var(--color-warning); }
+.app-tab-dot--llm { background: var(--color-success); }
+.app-tab-dot--rag { background: var(--color-info); }
+.app-tab-dot--nl2sql { background: var(--color-cyan-text); }
+
+.app-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-split);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-tabs :deep(.ant-tabs-tab-active) .app-tab-count {
+  background: var(--color-info-bg);
+  color: var(--color-info-strong);
+}
+
+/* ── Filter ── */
 .filter-toolbar {
-  margin-top: 18px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -279,25 +351,22 @@ onMounted(async () => {
   border: 1px solid transparent;
   border-radius: 999px;
   padding: 8px 14px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #64748b;
+  background: var(--color-split);
+  color: var(--color-text-tertiary);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.18s ease;
 }
 
-.filter-chip--soft {
-  background: rgba(248, 250, 252, 0.92);
-}
-
 .filter-chip:hover,
 .filter-chip--active {
-  border-color: rgba(59, 130, 246, 0.18);
-  background: rgba(219, 234, 254, 0.9);
-  color: #2563eb;
+  border-color: var(--color-info-bg-strong);
+  background: var(--color-info-bg);
+  color: var(--color-info-strong);
 }
 
+/* ── Grid & Cards ── */
 .app-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -307,59 +376,29 @@ onMounted(async () => {
 
 .app-card {
   padding: 20px;
-  border: 1px solid rgba(226, 232, 240, 0.88);
+  border: 1px solid var(--color-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--surface-strong);
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
 .app-card:hover {
   transform: translateY(-2px);
-  border-color: rgba(59, 130, 246, 0.24);
-  box-shadow: 0 18px 36px rgba(37, 99, 235, 0.08);
+  border-color: var(--color-info-bg-strong);
+  box-shadow: var(--shadow-info-drop);
 }
 
-.app-card-top-right {
+.app-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.app-type-tag {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.app-type--rag {
-  background: rgba(59, 130, 246, 0.1);
-  color: #2563eb;
-}
-
-.app-type--nl2sql {
-  background: rgba(6, 182, 212, 0.1);
-  color: #0891b2;
-}
-
-.app-type--llm {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-}
-
-.app-type--agent {
-  background: rgba(139, 92, 246, 0.1);
-  color: #7c3aed;
-}
-
-.app-type--agent_flow {
-  background: rgba(245, 158, 11, 0.12);
-  color: #d97706;
-}
-
 .app-card-status {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 
@@ -370,33 +409,33 @@ onMounted(async () => {
 }
 
 .app-status--published {
-  background: #10b981;
+  background: var(--color-success);
 }
 
 .app-status--draft {
-  background: #94a3b8;
+  background: var(--color-text-quaternary);
 }
 
 .app-status--offline {
-  background: #cbd5e1;
+  background: var(--color-border-secondary);
 }
 
 .app-status-text {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .app-card-name {
   margin: 14px 0 8px;
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .app-card-desc {
   min-height: 44px;
   margin: 0;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   font-size: 13px;
   line-height: 1.7;
   display: -webkit-box;
@@ -414,19 +453,18 @@ onMounted(async () => {
 
 .app-card-meta-item {
   font-size: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .app-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(226, 232, 240, 0.76);
+  border-top: 1px solid var(--color-border);
   font-size: 12px;
-  color: #94a3b8;
-}
-
-.app-card-calls {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--color-text-quaternary);
 }
 
 .empty-block {

@@ -57,7 +57,7 @@ const gradId = computed(() => `area-grad-${props.color.replace("#", "")}`);
         :y1="y"
         :x2="w"
         :y2="y"
-        stroke="rgba(148, 163, 184, 0.18)"
+        stroke="var(--color-neutral-bg)"
         stroke-width="1"
       />
       <polygon :points="areaPoints" :fill="`url(#${gradId})`" />
@@ -86,6 +86,6 @@ const gradId = computed(() => `area-grad-${props.color.replace("#", "")}`);
   margin-top: 4px;
   padding: 0 4px;
   font-size: 10px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 </style>

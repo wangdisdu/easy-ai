@@ -1,0 +1,57 @@
+{
+  "extends": ["stylelint-config-standard"],
+  "overrides": [
+    {
+      "files": ["**/*.vue"],
+      "customSyntax": "postcss-html"
+    }
+  ],
+  "ignoreFiles": [
+    "src/styles/tokens.css",
+    "node_modules/**",
+    "dist/**",
+    "src/assets/base.css",
+    "src/views/LoginView.vue"
+  ],
+  "rules": {
+    "no-descending-specificity": null,
+    "selector-class-pattern": null,
+    "custom-property-pattern": null,
+    "declaration-block-single-line-max-declarations": null,
+    "color-function-notation": null,
+    "color-function-alias-notation": null,
+    "alpha-value-notation": null,
+    "media-feature-range-notation": null,
+    "shorthand-property-no-redundant-values": null,
+    "value-keyword-case": null,
+    "comment-empty-line-before": null,
+    "rule-empty-line-before": null,
+    "declaration-empty-line-before": null,
+    "at-rule-empty-line-before": null,
+    "no-empty-source": null,
+    "length-zero-no-unit": null,
+    "hue-degree-notation": null,
+    "selector-pseudo-class-no-unknown": [
+      true,
+      { "ignorePseudoClasses": ["deep", "slotted", "global"] }
+    ],
+    "declaration-property-value-keyword-no-deprecated": null,
+    "font-family-name-quotes": null,
+    "property-no-vendor-prefix": null,
+    "color-hex-length": null,
+    "color-named": ["never", { "severity": "warning" }],
+    "declaration-property-value-disallowed-list": [
+      {
+        "/^(color|fill|stroke|caret-color)$/": ["/#[0-9a-fA-F]{3,8}\\b/", "/rgba?\\(/"],
+        "/^background(-color)?$/": ["/#[0-9a-fA-F]{3,8}\\b/", "/rgba?\\(/"],
+        "/^border(-(top|right|bottom|left|inline|block)(-start|-end)?)?(-color)?$/": ["/#[0-9a-fA-F]{3,8}\\b/", "/rgba?\\(/"],
+        "/^outline(-color)?$/": ["/#[0-9a-fA-F]{3,8}\\b/", "/rgba?\\(/"],
+        "/^(box|text)-shadow$/": ["/#[0-9a-fA-F]{3,8}\\b/", "/rgba?\\(/"]
+      },
+      {
+        "severity": "warning",
+        "message": "请使用 src/styles/tokens.css 中的 CSS 变量，避免在组件内硬编码颜色（主题切换会失效）"
+      }
+    ]
+  }
+}

@@ -819,14 +819,12 @@ onMounted(async () => {
 }
 
 .form-shell {
-  border: 1px solid rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--surface-card-border);
   border-radius: 24px;
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.86) 100%);
-  box-shadow:
-    0 24px 48px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+    radial-gradient(circle at top right, var(--color-info-bg), transparent 28%),
+    var(--surface-card-bg);
+  box-shadow: var(--surface-card-shadow);
   padding: 24px;
 }
 
@@ -841,13 +839,13 @@ onMounted(async () => {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .form-sub {
   margin: 6px 0 0;
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .step-pills {
@@ -859,16 +857,16 @@ onMounted(async () => {
   height: 30px;
   padding: 0 12px;
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.92);
-  color: #64748b;
+  background: var(--color-split);
+  color: var(--color-text-tertiary);
   font-size: 12px;
   font-weight: 600;
   line-height: 30px;
 }
 
 .step-pill--active {
-  background: rgba(37, 99, 235, 0.12);
-  color: #2563eb;
+  background: var(--color-info-bg);
+  color: var(--color-info-strong);
 }
 
 .type-grid {
@@ -883,9 +881,9 @@ onMounted(async () => {
   flex-direction: column;
   gap: 10px;
   padding: 18px;
-  border: 1px solid rgba(226, 232, 240, 0.88);
+  border: 1px solid var(--color-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--surface-strong);
   text-align: left;
   cursor: pointer;
   transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
@@ -894,8 +892,8 @@ onMounted(async () => {
 .type-card:hover,
 .type-card--selected {
   transform: translateY(-2px);
-  border-color: rgba(37, 99, 235, 0.22);
-  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.08);
+  border-color: var(--color-info-bg-strong);
+  box-shadow: var(--shadow-info-drop);
 }
 
 .type-icon {
@@ -911,18 +909,18 @@ onMounted(async () => {
 .type-name {
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .type-desc,
 .type-features {
   font-size: 13px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   line-height: 1.7;
 }
 
 .type-features {
-  color: #475569;
+  color: var(--color-text-secondary);
 }
 
 .app-form {
@@ -931,9 +929,9 @@ onMounted(async () => {
 
 .form-section {
   padding: 20px;
-  border: 1px solid rgba(226, 232, 240, 0.88);
+  border: 1px solid var(--color-border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--surface-strong);
   margin-bottom: 16px;
 }
 
@@ -953,13 +951,13 @@ onMounted(async () => {
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .section-sub {
   margin: 6px 0 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .config-list {
@@ -971,8 +969,8 @@ onMounted(async () => {
 .config-list-item {
   padding: 12px;
   border-radius: 14px;
-  background: rgba(248, 250, 252, 0.92);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: var(--surface-muted-hover);
+  border: 1px solid var(--color-border);
 }
 
 
@@ -992,8 +990,8 @@ onMounted(async () => {
 .switch-card {
   padding: 14px;
   border-radius: 14px;
-  background: rgba(248, 250, 252, 0.92);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: var(--surface-muted-hover);
+  border: 1px solid var(--color-border);
 }
 
 .switch-head {
@@ -1006,7 +1004,7 @@ onMounted(async () => {
 .switch-title {
   font-size: 13px;
   font-weight: 600;
-  color: #334155;
+  color: var(--color-text-secondary);
 }
 
 .form-actions {

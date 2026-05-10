@@ -323,24 +323,24 @@ async function onDelete(record: UserGroupResp) {
 <style scoped>
 .group-item:hover,
 .group-item--active {
-  border-color: rgba(13, 148, 136, 0.18);
-  border-left-color: #0f766e;
-  background: linear-gradient(90deg, rgba(204, 251, 241, 0.68) 0%, rgba(255, 255, 255, 0.7) 100%);
-  box-shadow: 0 14px 28px rgba(13, 148, 136, 0.08);
+  border-color: var(--color-teal-border);
+  border-left-color: var(--color-teal-strong);
+  background: var(--surface-teal-soft);
+  box-shadow: var(--shadow-teal-drop);
 }
 
 .group-code {
-  color: #0f766e;
-  background: rgba(20, 184, 166, 0.1);
+  color: var(--color-teal-strong);
+  background: var(--color-teal-bg);
 }
 
 .group-pill {
-  background: rgba(20, 184, 166, 0.12);
-  color: #0f766e;
+  background: var(--color-teal-bg);
+  color: var(--color-teal-strong);
 }
 
 .group-avatar {
-  background: linear-gradient(135deg, #ccfbf1 0%, #5eead4 100%);
-  color: #0f766e;
+  background: var(--gradient-teal-corner);
+  color: var(--color-teal-strong);
 }
 </style>

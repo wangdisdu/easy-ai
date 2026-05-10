@@ -57,6 +57,52 @@
             </a-breadcrumb>
           </a-col>
           <a-col flex="none" class="header-user">
+            <a-tooltip :title="isDark ? '切换到浅色主题' : '切换到深色主题'">
+              <a-button
+                type="text"
+                class="header-theme-toggle"
+                :aria-label="isDark ? '切换到浅色主题' : '切换到深色主题'"
+                @click="theme.toggle()"
+              >
+                <!-- 暗色主题下显示月亮（实心 / 圆润），亮色主题下显示太阳（线性 / 放射） -->
+                <svg
+                  v-if="isDark"
+                  class="theme-icon"
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="currentColor"
+                  aria-hidden="true"
+                >
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+                <svg
+                  v-else
+                  class="theme-icon"
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="4" />
+                  <line x1="12" y1="2" x2="12" y2="4" />
+                  <line x1="12" y1="20" x2="12" y2="22" />
+                  <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
+                  <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
+                  <line x1="2" y1="12" x2="4" y2="12" />
+                  <line x1="20" y1="12" x2="22" y2="12" />
+                  <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
+                  <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
+                </svg>
+              </a-button>
+            </a-tooltip>
             <a-dropdown>
               <a-button type="text" class="header-user-trigger">
                 <span class="header-user-avatar">{{ userInitial }}</span>
@@ -91,12 +137,15 @@ import {
   RightOutlined,
 } from "@ant-design/icons-vue";
 import { useAuthStore } from "@/stores/auth";
+import { useThemeStore } from "@/stores/theme";
 import logoAi from "@/assets/icons/logo-ai.svg";
 import AppIcon from "@/components/AppIcon.vue";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const theme = useThemeStore();
+const isDark = computed(() => theme.mode === "dark");
 
 type IconKey =
   | "appstore"
@@ -183,12 +232,9 @@ async function onLogout() {
 }
 
 .app-layout-sider {
-  background:
-    linear-gradient(180deg, rgba(241, 245, 255, 0.92) 0%, rgba(255, 255, 255, 1) 28%, rgba(248, 250, 255, 1) 100%) !important;
-  border-right: 1px solid rgba(22, 119, 255, 0.08);
-  box-shadow:
-    inset -1px 0 0 rgba(255, 255, 255, 0.8),
-    8px 0 24px rgba(15, 23, 42, 0.03);
+  background: var(--surface-sider-bg) !important;
+  border-right: 1px solid var(--surface-sider-border);
+  box-shadow: var(--surface-sider-shadow);
 }
 
 .app-layout-sider :deep(.ant-layout-sider-children) {
@@ -230,7 +276,7 @@ async function onLogout() {
   height: 3px;
   margin-bottom: 10px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #1677ff 0%, #7c3aed 100%);
+  background: var(--gradient-brand-horizontal);
 }
 
 .sider-brand-icon {
@@ -252,7 +298,7 @@ async function onLogout() {
   font-size: 15px;
   line-height: 1.2;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
   letter-spacing: 0.04em;
 }
 
@@ -263,7 +309,7 @@ async function onLogout() {
   font-weight: 600;
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .app-side-menu {
@@ -280,7 +326,7 @@ async function onLogout() {
   width: auto;
   margin: 2px 0;
   border-radius: var(--menu-radius);
-  color: #64748b;
+  color: var(--color-text-tertiary);
   transition:
     color 0.2s ease,
     background 0.2s ease,
@@ -298,16 +344,16 @@ async function onLogout() {
 }
 
 .app-side-menu :deep(.ant-menu-item:hover) {
-  color: #334155;
-  background: rgba(22, 119, 255, 0.05) !important;
+  color: var(--color-text-secondary);
+  background: var(--color-primary-bg-soft) !important;
   transform: translateX(1px);
 }
 
 .app-side-menu :deep(.ant-menu-item-selected) {
-  background: linear-gradient(90deg, rgba(22, 119, 255, 0.14) 0%, rgba(22, 119, 255, 0.05) 100%) !important;
-  color: #0f172a !important;
+  background: linear-gradient(90deg, var(--color-primary-bg) 0%, var(--color-primary-bg-soft) 100%) !important;
+  color: var(--color-text) !important;
   font-weight: 500;
-  box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.04);
+  box-shadow: inset 0 0 0 1px var(--color-primary-bg-soft);
 }
 
 .app-side-menu :deep(.ant-menu-item-selected)::after {
@@ -323,12 +369,12 @@ async function onLogout() {
   height: 20px;
   border-radius: 0 3px 3px 0;
   transform: translateY(-50%);
-  background: linear-gradient(180deg, #1677ff 0%, #7c3aed 100%);
-  box-shadow: 0 0 8px rgba(22, 119, 255, 0.28);
+  background: var(--gradient-brand-vertical);
+  box-shadow: 0 0 8px var(--color-primary-glow);
 }
 
 .app-side-menu :deep(.ant-menu-item-selected .ant-menu-item-icon) {
-  color: #1677ff;
+  color: var(--color-primary);
 }
 
 .app-side-menu :deep(.ant-menu-inline-collapsed > .ant-menu-item) {
@@ -346,7 +392,7 @@ async function onLogout() {
   border: 0;
   border-radius: var(--menu-radius);
   background: transparent;
-  color: #64748b;
+  color: var(--color-text-tertiary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -356,8 +402,8 @@ async function onLogout() {
 }
 
 .sider-collapse-btn:hover {
-  color: #334155;
-  background: rgba(22, 119, 255, 0.05);
+  color: var(--color-text-secondary);
+  background: var(--color-primary-bg-soft);
 }
 
 .app-layout-main.ant-layout {
@@ -379,9 +425,9 @@ async function onLogout() {
   overflow: auto;
   padding-block: var(--content-pad);
   background:
-    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px),
-    rgb(249 250 253);
+    linear-gradient(var(--surface-content-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--surface-content-grid) 1px, transparent 1px),
+    var(--surface-content-bg);
   background-size: 48px 48px;
   background-position: 0 0;
 }
@@ -390,30 +436,75 @@ async function onLogout() {
   height: var(--header-height);
   line-height: var(--header-height);
   padding-block: 0;
-  background: rgba(255, 255, 255, 0.78) !important;
+  background: var(--surface-header-bg) !important;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  border-bottom: 1px solid var(--surface-header-border);
+  box-shadow: var(--surface-header-shadow);
 }
 
-.header-row,
-.header-left {
+/* Header row：拉伸到 header 全高，让 .header-user 的左分割线能贴顶贴底；
+   .header-left 内部自己居中。 */
+.header-row {
   display: flex;
   width: 100%;
-  align-items: center;
+  height: 100%;
+  align-items: stretch;
 }
 
 .header-left {
-  justify-content: flex-start;
+  display: flex;
+  flex: 1;
   min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .header-user {
   flex-shrink: 0;
+  position: relative;
   padding-left: 18px;
   margin-left: 20px;
-  border-left: 1px solid rgba(148, 163, 184, 0.16);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Inset 分割线：短一截、纵向居中，比贯通的工业风更轻盈现代 */
+.header-user::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 22px;
+  background: var(--surface-divider);
+  border-radius: 1px;
+}
+
+/* 让 theme toggle 和 user trigger 高度/圆角一致，视觉 baseline 对齐 */
+.header-theme-toggle {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--color-text-secondary);
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.header-theme-toggle:hover {
+  color: var(--color-primary);
+  background: var(--color-glass-bg);
+}
+
+/* SVG 图标继承按钮的 color，hover 时跟着变蓝 */
+.theme-icon {
+  display: block;
+  color: inherit;
 }
 
 .header-breadcrumb { margin: 0; }
@@ -426,11 +517,11 @@ async function onLogout() {
 
 .header-breadcrumb :deep(.ant-breadcrumb-link),
 .header-breadcrumb :deep(.ant-breadcrumb-separator) {
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .header-breadcrumb :deep(li:last-child .ant-breadcrumb-link) {
-  color: #0f172a;
+  color: var(--color-text);
   font-weight: 600;
 }
 
@@ -438,13 +529,13 @@ async function onLogout() {
   height: 40px;
   padding: 4px 8px 4px 4px;
   border-radius: 12px;
-  color: #475569;
+  color: var(--color-text-secondary);
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.46);
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  background: var(--surface-trigger-bg);
+  border: 1px solid var(--surface-trigger-border);
+  box-shadow: inset 0 1px 0 var(--surface-trigger-inset);
   transition:
     color 0.2s ease,
     border-color 0.2s ease,
@@ -452,9 +543,9 @@ async function onLogout() {
 }
 
 .header-user-trigger:hover {
-  color: #0f172a !important;
-  border-color: rgba(22, 119, 255, 0.24);
-  background: rgba(255, 255, 255, 0.72) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-primary-bg-strong);
+  background: var(--color-glass-bg) !important;
 }
 
 .header-user-trigger :deep(.ant-btn-icon) {
@@ -468,8 +559,8 @@ async function onLogout() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(22, 119, 255, 0.9) 0%, rgba(124, 58, 237, 0.8) 100%);
-  color: #fff;
+  background: var(--gradient-brand-corner);
+  color: var(--color-text-inverse);
   font-size: 12px;
   font-weight: 700;
   flex: 0 0 30px;
@@ -486,16 +577,16 @@ async function onLogout() {
 .header-user-name {
   font-size: 12px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .header-user-role {
   font-size: 10px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .header-user-chevron {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--color-text-quaternary);
 }
 </style>

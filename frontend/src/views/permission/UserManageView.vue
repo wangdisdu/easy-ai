@@ -318,8 +318,8 @@ async function onDelete(record: UserResp) {
 <style scoped>
 .user-card {
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 26%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.84) 100%);
+    radial-gradient(circle at top right, var(--color-info-bg), transparent 26%),
+    var(--surface-card-bg);
   padding: 20px;
 }
 
@@ -344,11 +344,11 @@ async function onDelete(record: UserResp) {
   width: 36px;
   height: 36px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
-  color: #1d4ed8;
+  background: var(--gradient-info-corner);
+  color: var(--color-info-strong);
   font-size: 14px;
   font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  box-shadow: inset 0 1px 0 var(--surface-trigger-inset);
 }
 
 .user-meta {
@@ -359,12 +359,12 @@ async function onDelete(record: UserResp) {
 
 .user-name {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--color-text);
 }
 
 .user-sub {
   font-size: 12px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .user-chips {
@@ -379,9 +379,9 @@ async function onDelete(record: UserResp) {
   height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.08);
-  border: 1px solid rgba(191, 219, 254, 0.9);
-  color: #1d4ed8;
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-bg-strong);
+  color: var(--color-info-strong);
   font-size: 12px;
   font-weight: 600;
 }

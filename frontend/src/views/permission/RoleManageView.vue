@@ -302,25 +302,25 @@ async function onDelete(record: RoleResp) {
 <style scoped>
 .role-item:hover,
 .role-item--active {
-  border-color: rgba(59, 130, 246, 0.18);
-  border-left-color: #2563eb;
-  background: linear-gradient(90deg, rgba(219, 234, 254, 0.68) 0%, rgba(255, 255, 255, 0.7) 100%);
-  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.08);
+  border-color: var(--color-info-bg-strong);
+  border-left-color: var(--color-info-strong);
+  background: var(--surface-info-side);
+  box-shadow: var(--shadow-info-drop);
 }
 
 .role-code {
-  color: #1d4ed8;
-  background: rgba(37, 99, 235, 0.1);
+  color: var(--color-info-strong);
+  background: var(--color-info-bg);
 }
 
 .role-pill {
-  background: rgba(37, 99, 235, 0.1);
-  color: #1d4ed8;
+  background: var(--color-info-bg);
+  color: var(--color-info-strong);
 }
 
 .role-avatar {
-  background: linear-gradient(135deg, #dbeafe 0%, #93c5fd 100%);
-  color: #1d4ed8;
+  background: var(--gradient-info-corner);
+  color: var(--color-info-strong);
 }
 
 .role-meta-row {
@@ -337,18 +337,18 @@ async function onDelete(record: RoleResp) {
   gap: 6px;
   padding: 12px 14px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(191, 219, 254, 0.8);
+  background: var(--surface-strong);
+  border: 1px solid var(--color-info-bg-strong);
 }
 
 .role-mini-label {
   font-size: 11px;
-  color: #64748b;
+  color: var(--color-text-tertiary);
 }
 
 .role-mini-value {
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--color-text);
 }
 </style>
