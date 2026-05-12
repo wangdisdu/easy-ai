@@ -10,7 +10,7 @@ import type {
 export interface SkillCreateBody {
   name: string;
   description?: string;
-  category?: string;
+  category_ids?: string[];
   instruction: string;
   tools?: SkillToolItem[];
 }
@@ -18,20 +18,16 @@ export interface SkillCreateBody {
 export interface SkillUpdateBody {
   name?: string;
   description?: string;
-  category?: string;
+  category_ids?: string[];
   instruction?: string;
   tools?: SkillToolItem[];
-}
-
-export function listCategories() {
-  return request.get<ApiResp<string[]>>("/api/v1/skill/category");
 }
 
 export function pageSkill(params: {
   page_no: number;
   page_size: number;
   keyword?: string;
-  category?: string;
+  category_id?: string;
   skill_status?: string;
 }) {
   return request.get<ApiPageResp<SkillResp>>("/api/v1/skill/page", { params });

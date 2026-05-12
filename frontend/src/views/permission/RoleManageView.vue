@@ -47,7 +47,7 @@
               <div class="role-meta-row">
                 <div class="role-mini-card">
                   <span class="role-mini-label">权限配置</span>
-                  <span class="role-mini-value">{{ selectedRole.permissions?.length ?? 0 }} 项</span>
+                  <span class="role-mini-value">{{ permissionSummary(selectedRole) }}</span>
                 </div>
               </div>
             </div>
@@ -63,22 +63,35 @@
             <div class="perm-card-head perm-card-head--compact">
               <div>
                 <h4 class="perm-card-title">权限码</h4>
-                <p class="perm-card-sub">以下为当前角色可配置的权限码。</p>
+                <p class="perm-card-sub">按模块分组，每个权限码覆盖一组同性质的操作。</p>
               </div>
+              <span v-if="isWildcard(selectedRole)" class="perm-detail-pill role-pill">全部权限 *</span>
             </div>
-            <div class="perm-grid">
-              <div
-                v-for="permission in permissionOptions"
-                :key="permission"
-                class="perm-grid-item"
-                :class="{ 'perm-grid-item--active': selectedRole.permissions?.includes(permission) }"
-              >
-                <span class="perm-grid-mark">
-                  {{ selectedRole.permissions?.includes(permission) ? "已选" : "未选" }}
-                </span>
-                {{ permission }}
+            <div v-if="isWildcard(selectedRole)" class="perm-detail-placeholder">
+              当前角色配置为通配符 *，自动拥有所有模块权限。
+            </div>
+            <template v-else>
+              <div v-for="group in groupedOptions" :key="group.name" class="perm-group">
+                <div class="perm-group-title">{{ group.name }}</div>
+                <div class="perm-grid">
+                  <div
+                    v-for="opt in group.items"
+                    :key="opt.code"
+                    class="perm-grid-item perm-grid-item--detail"
+                    :class="{ 'perm-grid-item--active': hasPermission(selectedRole, opt.code) }"
+                  >
+                    <div class="perm-grid-meta">
+                      <span class="perm-grid-label">{{ opt.label }}</span>
+                      <span class="perm-grid-desc">{{ opt.description }}</span>
+                      <span class="perm-grid-code">{{ opt.code }}</span>
+                    </div>
+                    <span class="perm-grid-mark">
+                      {{ hasPermission(selectedRole, opt.code) ? "已选" : "未选" }}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
+            </template>
           </section>
 
           <section class="perm-card perm-detail-panel">
@@ -117,7 +130,7 @@
       :title="formMode === 'create' ? '新建角色' : '编辑角色'"
       :confirm-loading="submitting"
       destroy-on-close
-      width="640px"
+      width="720px"
       @ok="submitForm"
     >
       <a-form ref="formRef" :model="formModel" :rules="formRules" layout="vertical">
@@ -127,12 +140,33 @@
         <a-form-item label="名称" name="name">
           <a-input v-model:value="formModel.name" />
         </a-form-item>
-        <a-form-item v-if="formMode === 'edit'" label="权限码" name="permissions">
-          <a-checkbox-group v-model:value="formModel.permissions" class="perm-grid">
-            <div v-for="permission in permissionOptions" :key="permission" class="perm-grid-item">
-              <a-checkbox :value="permission">{{ permission }}</a-checkbox>
+        <a-form-item v-if="formMode === 'edit'" label="权限码">
+          <a-checkbox v-model:checked="formModel.wildcard" class="perm-wildcard">
+            授予全部权限（*，超级管理员）
+          </a-checkbox>
+          <div v-if="!formModel.wildcard" class="perm-form-groups">
+            <div v-for="group in groupedOptions" :key="group.name" class="perm-group">
+              <div class="perm-group-title">{{ group.name }}</div>
+              <div class="perm-grid">
+                <label
+                  v-for="opt in group.items"
+                  :key="opt.code"
+                  class="perm-grid-item perm-grid-item--form"
+                  :class="{ 'perm-grid-item--active': formModel.permissions.includes(opt.code) }"
+                >
+                  <a-checkbox
+                    :checked="formModel.permissions.includes(opt.code)"
+                    @change="togglePermission(opt.code)"
+                  />
+                  <div class="perm-grid-meta">
+                    <span class="perm-grid-label">{{ opt.label }}</span>
+                    <span class="perm-grid-desc">{{ opt.description }}</span>
+                    <span class="perm-grid-code">{{ opt.code }}</span>
+                  </div>
+                </label>
+              </div>
             </div>
-          </a-checkbox-group>
+          </div>
         </a-form-item>
       </a-form>
     </a-modal>
@@ -144,16 +178,21 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import type { FormInstance, Rule } from "ant-design-vue/es/form";
 import { message } from "ant-design-vue";
 import * as api from "@/api/role";
+import { listPermissionOptions, type PermissionOption } from "@/api/permission";
 import type { RoleResp, UserResp } from "@/api/types";
 
-const permissionOptions = [
-  "应用工厂",
-  "技能管理",
-  "工具管理",
-  "知识库管理",
-  "系统配置",
-  "权限管理",
-];
+const WILDCARD = "*";
+
+const permissionOptions = ref<PermissionOption[]>([]);
+
+const groupedOptions = computed<{ name: string; items: PermissionOption[] }[]>(() => {
+  const map = new Map<string, PermissionOption[]>();
+  for (const opt of permissionOptions.value) {
+    if (!map.has(opt.group)) map.set(opt.group, []);
+    map.get(opt.group)!.push(opt);
+  }
+  return Array.from(map.entries()).map(([name, items]) => ({ name, items }));
+});
 
 const keyword = ref("");
 const list = ref<RoleResp[]>([]);
@@ -175,6 +214,7 @@ const formModel = reactive({
   code: "",
   name: "",
   permissions: [] as string[],
+  wildcard: false,
 });
 
 const formRules: Record<string, Rule[]> = {
@@ -217,6 +257,11 @@ async function loadList() {
   }
 }
 
+async function loadPermissionOptions() {
+  const { data } = await listPermissionOptions();
+  permissionOptions.value = data.data;
+}
+
 async function loadRoleUsers(roleId: string) {
   roleUsersLoading.value = true;
   try {
@@ -232,11 +277,38 @@ function onSearch() {
   loadList();
 }
 
-onMounted(() => loadList());
+onMounted(() => {
+  loadList();
+  loadPermissionOptions();
+});
+
+function isWildcard(role: RoleResp) {
+  return role.permissions?.includes(WILDCARD) ?? false;
+}
+
+function hasPermission(role: RoleResp, code: string) {
+  if (!role.permissions) return false;
+  return role.permissions.includes(WILDCARD) || role.permissions.includes(code);
+}
+
+function permissionSummary(role: RoleResp) {
+  if (isWildcard(role)) return "全部权限";
+  return `${role.permissions?.length ?? 0} 项`;
+}
 
 function roleSummary(role: RoleResp) {
+  if (isWildcard(role)) return "拥有全部模块权限。";
   const count = role.permissions?.length ?? 0;
   return count ? `已配置 ${count} 项权限码。` : "暂未配置权限码。";
+}
+
+function togglePermission(code: string) {
+  const idx = formModel.permissions.indexOf(code);
+  if (idx >= 0) {
+    formModel.permissions.splice(idx, 1);
+  } else {
+    formModel.permissions.push(code);
+  }
 }
 
 function openCreate() {
@@ -245,6 +317,7 @@ function openCreate() {
   formModel.code = "";
   formModel.name = "";
   formModel.permissions = [];
+  formModel.wildcard = false;
   formOpen.value = true;
 }
 
@@ -253,7 +326,9 @@ function openEdit(record: RoleResp) {
   editingId.value = record.id;
   formModel.code = record.code;
   formModel.name = record.name;
-  formModel.permissions = [...(record.permissions ?? [])];
+  const perms = record.permissions ?? [];
+  formModel.wildcard = perms.includes(WILDCARD);
+  formModel.permissions = formModel.wildcard ? [] : [...perms];
   formOpen.value = true;
 }
 
@@ -274,9 +349,10 @@ async function submitForm() {
       });
       message.success("创建成功");
     } else if (editingId.value) {
+      const permissions = formModel.wildcard ? [WILDCARD] : formModel.permissions;
       await api.updateRole(editingId.value, {
         name: formModel.name,
-        permissions: formModel.permissions,
+        permissions,
       });
       message.success("更新成功");
     }
@@ -350,5 +426,68 @@ async function onDelete(record: RoleResp) {
   font-size: 15px;
   font-weight: 700;
   color: var(--color-text);
+}
+
+.perm-group + .perm-group {
+  margin-top: 18px;
+}
+
+.perm-group-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.perm-grid-item--detail,
+.perm-grid-item--form {
+  align-items: flex-start;
+}
+
+.perm-grid-item--form {
+  cursor: pointer;
+  gap: 10px;
+}
+
+.perm-grid-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.perm-grid-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.perm-grid-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.perm-grid-code {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-tertiary);
+}
+
+.perm-grid-item--active .perm-grid-label {
+  color: var(--color-info-strong);
+}
+
+.perm-wildcard {
+  margin-bottom: 12px;
+}
+
+.perm-form-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 </style>

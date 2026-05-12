@@ -14,7 +14,7 @@
       class="draft-banner"
     >
       <template #action>
-        <a-button type="primary" size="small" @click="openPublish">发布应用</a-button>
+        <a-button v-if="canPublish" type="primary" size="small" @click="openPublish">发布应用</a-button>
       </template>
     </a-alert>
 
@@ -36,6 +36,11 @@
             </div>
             <h2 class="hero-title">{{ app.name }}</h2>
             <p class="hero-desc">{{ app.description || "暂无描述" }}</p>
+            <div v-if="app.categories && app.categories.length" class="hero-cat-tags">
+              <a-tag v-for="c in app.categories" :key="c.id" color="blue">
+                {{ c.name }}
+              </a-tag>
+            </div>
           </div>
         </div>
 
@@ -82,7 +87,7 @@
       </div>
 
       <div class="hero-actions">
-        <a-button @click="router.push(`/app/${app.id}/edit`)">编辑</a-button>
+        <a-button v-if="canEdit" @click="router.push(`/app/${app.id}/edit`)">编辑</a-button>
         <a-button
           v-if="app.app_type === 'agent_flow'"
           type="primary"
@@ -93,11 +98,11 @@
           打开画布
         </a-button>
         <a-button v-if="['llm', 'agent'].includes(app.app_type)" @click="openTestDrawer">测试</a-button>
-        <a-button v-if="app.app_status === 'published'" @click="onOffline">下线</a-button>
-        <a-button v-if="app.app_status === 'offline'" type="primary" @click="openPublish">上线</a-button>
-        <a-button v-if="app.app_status === 'draft'" type="primary" @click="openPublish">发布应用</a-button>
-        <a-button v-if="app.app_status === 'published'" type="primary" @click="openPublish">发布新版本</a-button>
-        <a-popconfirm title="确定删除该应用？" @confirm="onDelete">
+        <a-button v-if="canPublish && app.app_status === 'published'" @click="onOffline">下线</a-button>
+        <a-button v-if="canPublish && app.app_status === 'offline'" type="primary" @click="openPublish">上线</a-button>
+        <a-button v-if="canPublish && app.app_status === 'draft'" type="primary" @click="openPublish">发布应用</a-button>
+        <a-button v-if="canPublish && app.app_status === 'published'" type="primary" @click="openPublish">发布新版本</a-button>
+        <a-popconfirm v-if="canEdit" title="确定删除该应用？" @confirm="onDelete">
           <a-button danger>删除</a-button>
         </a-popconfirm>
       </div>
@@ -286,6 +291,12 @@
             </div>
           </div>
           <a-empty v-else :image="false" description="暂无历史消息" />
+        </section>
+      </a-tab-pane>
+
+      <a-tab-pane v-if="showMemoryTab" key="memory" tab="记忆管理">
+        <section class="panel-card panel-card--full">
+          <AppMemoryPanel :app-id="app.id" :app-name="app.name" />
         </section>
       </a-tab-pane>
 
@@ -630,7 +641,10 @@ import * as llmApi from "@/api/llm";
 import type { HitlAction } from "@/api/conversation";
 import type { AppLogResp, AppResp, AppVersionResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
 import { formatMs } from "@/utils/time";
+import AppMemoryPanel from "@/components/AppMemoryPanel.vue";
 import HitlConfirmCard, { type HitlPayload } from "@/components/HitlConfirmCard.vue";
 
 const route = useRoute();
@@ -774,6 +788,15 @@ const typeConfigTitle: Record<string, string> = {
 };
 
 const showApiDocsTab = computed(() => app.value?.app_status === "published");
+
+const auth = useAuthStore();
+const canEdit = computed(() => auth.hasPermission(PERM.APP_EDIT));
+const canPublish = computed(() => auth.hasPermission(PERM.APP_PUBLISH));
+const showMemoryTab = computed(() => {
+  const me = auth.user?.id;
+  if (!me || !app.value?.create_user) return false;
+  return String(app.value.create_user) === String(me);
+});
 const llmInputVars = computed<Array<{ name: string; label?: string; type?: string }>>(() => {
   const inputVars = app.value?.app_config?.input_vars;
   return Array.isArray(inputVars) ? (inputVars as Array<{ name: string; label?: string; type?: string }>) : [];
@@ -1305,6 +1328,13 @@ onMounted(() => {
   margin: 0;
   color: var(--color-text-tertiary);
   line-height: 1.8;
+}
+
+.hero-cat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .hero-metrics {

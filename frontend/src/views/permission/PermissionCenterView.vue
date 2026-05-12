@@ -13,13 +13,13 @@
       class="permission-center-tabs"
       @change="onTabChange"
     >
-      <a-tab-pane key="users" tab="用户管理">
+      <a-tab-pane v-if="canUser" key="users" tab="用户管理">
         <UserManageView />
       </a-tab-pane>
-      <a-tab-pane key="roles" tab="角色管理">
+      <a-tab-pane v-if="canRole" key="roles" tab="角色管理">
         <RoleManageView />
       </a-tab-pane>
-      <a-tab-pane key="user-groups" tab="用户组">
+      <a-tab-pane v-if="canUser" key="user-groups" tab="用户组">
         <UserGroupManageView />
       </a-tab-pane>
     </a-tabs>
@@ -32,11 +32,16 @@ import { useRoute, useRouter } from "vue-router";
 import UserManageView from "@/views/permission/UserManageView.vue";
 import RoleManageView from "@/views/permission/RoleManageView.vue";
 import UserGroupManageView from "@/views/permission/UserGroupManageView.vue";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
 
 type TabKey = "users" | "roles" | "user-groups";
 
 const route = useRoute();
 const router = useRouter();
+const auth = useAuthStore();
+const canUser = computed(() => auth.hasPermission(PERM.PERMISSION_USER));
+const canRole = computed(() => auth.hasPermission(PERM.PERMISSION_ROLE));
 const tabKeys: TabKey[] = ["users", "roles", "user-groups"];
 
 const activeTab = computed<TabKey>(() => {
@@ -44,7 +49,7 @@ const activeTab = computed<TabKey>(() => {
   if (typeof tab === "string" && tabKeys.includes(tab as TabKey)) {
     return tab as TabKey;
   }
-  return "users";
+  return canUser.value ? "users" : "roles";
 });
 
 function onTabChange(tab: string) {

@@ -50,6 +50,21 @@ export interface RoleResp {
   update_time: number;
 }
 
+export interface AppCategoryResp {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  sort_order: number;
+  create_time: number;
+  update_time: number;
+}
+
+export interface AppCategoryRef {
+  id: string;
+  name: string;
+}
+
 export interface AppResp {
   id: string;
   name: string;
@@ -69,6 +84,8 @@ export interface AppResp {
   flowise_chatflow_id?: string | null;
   tool_ids?: string[];
   skill_ids?: string[];
+  category_ids?: string[];
+  categories?: AppCategoryRef[];
   create_user?: string | null;
   create_time: number;
   update_time: number;
@@ -220,7 +237,8 @@ export interface SkillResp {
   id: string;
   name: string;
   description?: string | null;
-  category?: string | null;
+  category_ids?: string[];
+  categories?: AppCategoryRef[];
   instruction: string;
   skill_status: string;
   current_version?: string | null;

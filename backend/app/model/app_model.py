@@ -6,11 +6,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.db.schema import TbApp, TbAppVersion
+from app.model.app_category_model import AppCategoryRef
 
 
 class AppCreateReq(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None)
+    # 关联的应用分类 ID 列表（多对多）
+    category_ids: list[str] | None = Field(default=None)
     app_type: str = Field(min_length=1, max_length=255)
     provider_id: str | None = Field(default=None)
     model_id: str | None = Field(default=None)
@@ -27,6 +30,8 @@ class AppCreateReq(BaseModel):
 class AppUpdateReq(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = Field(default=None)
+    # None 表示不更新，[] 表示清空
+    category_ids: list[str] | None = Field(default=None)
     provider_id: str | None = Field(default=None)
     model_id: str | None = Field(default=None)
     model_setting: dict[str, Any] | None = Field(default=None)
@@ -45,6 +50,7 @@ class AppPageReq(BaseModel):
     keyword: str | None = Field(default=None, max_length=255)
     app_type: str | None = Field(default=None, max_length=255)
     app_status: str | None = Field(default=None, max_length=255)
+    category_id: str | None = Field(default=None)
 
 
 class AppPublishReq(BaseModel):
@@ -73,6 +79,9 @@ class AppResp(BaseModel):
     # 仅 agent 应用返回：绑定的工具/技能 ID 列表
     tool_ids: list[str] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list)
+    # 关联的应用分类
+    category_ids: list[str] = Field(default_factory=list)
+    categories: list[AppCategoryRef] = Field(default_factory=list)
     create_user: str | None = None
     create_time: int
     update_time: int

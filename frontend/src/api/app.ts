@@ -17,6 +17,7 @@ export interface AppCreateBody {
   enable_log?: boolean;
   tool_ids?: string[];
   skill_ids?: string[];
+  category_ids?: string[];
 }
 
 export interface AppUpdateBody {
@@ -31,6 +32,7 @@ export interface AppUpdateBody {
   enable_log?: boolean;
   tool_ids?: string[];
   skill_ids?: string[];
+  category_ids?: string[];
 }
 
 export interface AppTestBody {
@@ -46,6 +48,7 @@ export function pageApp(params: {
   keyword?: string;
   app_type?: string;
   app_status?: string;
+  category_id?: string;
 }) {
   return request.get<ApiPageResp<AppResp>>("/api/v1/app/page", { params });
 }

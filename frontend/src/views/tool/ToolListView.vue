@@ -5,7 +5,7 @@
         <h2 class="tool-page-title">工具管理</h2>
         <p class="tool-page-sub">管理智能体可调用的系统内置工具、MCP 工具和 API 集成工具</p>
       </div>
-      <a-dropdown>
+      <a-dropdown v-if="canEdit">
         <a-button type="primary" class="tool-head-btn">
           <template #icon><PlusOutlined /></template>
           添加工具
@@ -149,13 +149,13 @@
                   <pre class="detail-json">{{ JSON.stringify(t.parameters, null, 2) }}</pre>
                 </div>
                 <div class="detail-footer">
-                  <a-button size="small" type="link" @click="router.push(`/tool/api-tool/${t.id}`)">编辑</a-button>
-                  <a-button size="small" type="link" @click="openPolicyEditor(t)">策略</a-button>
-                  <a-button v-if="t.tool_status === 'enabled'" size="small" type="link" class="btn-warn" @click="onDisable(t)">停用</a-button>
-                  <a-button v-else size="small" type="link" class="btn-green" @click="onEnable(t)">启用</a-button>
+                  <a-button v-if="canEdit" size="small" type="link" @click="router.push(`/tool/api-tool/${t.id}`)">编辑</a-button>
+                  <a-button v-if="canControl" size="small" type="link" @click="openPolicyEditor(t)">策略</a-button>
+                  <a-button v-if="canControl && t.tool_status === 'enabled'" size="small" type="link" class="btn-warn" @click="onDisable(t)">停用</a-button>
+                  <a-button v-else-if="canControl" size="small" type="link" class="btn-green" @click="onEnable(t)">启用</a-button>
                   <span class="detail-spacer" />
                   <span class="detail-time">更新于 {{ formatMs(t.update_time) }}</span>
-                  <a-popconfirm title="确定删除该工具？" @confirm="onDelete(t)">
+                  <a-popconfirm v-if="canEdit" title="确定删除该工具？" @confirm="onDelete(t)">
                     <a-button size="small" type="link" danger>删除</a-button>
                   </a-popconfirm>
                 </div>
@@ -253,13 +253,13 @@
               </template>
 
               <div class="detail-footer">
-                <a-button size="small" type="link" @click="router.push(`/tool/api-tool/${t.id}`)">编辑</a-button>
-                <a-button size="small" type="link" @click="openPolicyEditor(t)">策略</a-button>
-                <a-button v-if="t.tool_status === 'enabled'" size="small" type="link" class="btn-warn" @click="onDisable(t)">停用</a-button>
-                <a-button v-else size="small" type="link" class="btn-green" @click="onEnable(t)">启用</a-button>
+                <a-button v-if="canEdit" size="small" type="link" @click="router.push(`/tool/api-tool/${t.id}`)">编辑</a-button>
+                <a-button v-if="canControl" size="small" type="link" @click="openPolicyEditor(t)">策略</a-button>
+                <a-button v-if="canControl && t.tool_status === 'enabled'" size="small" type="link" class="btn-warn" @click="onDisable(t)">停用</a-button>
+                <a-button v-else-if="canControl" size="small" type="link" class="btn-green" @click="onEnable(t)">启用</a-button>
                 <span class="detail-spacer" />
                 <span class="detail-time">更新于 {{ formatMs(t.update_time) }}</span>
-                <a-popconfirm title="确定删除该工具？" @confirm="onDelete(t)">
+                <a-popconfirm v-if="canEdit" title="确定删除该工具？" @confirm="onDelete(t)">
                   <a-button size="small" type="link" danger>删除</a-button>
                 </a-popconfirm>
               </div>
@@ -318,8 +318,13 @@ import * as toolApi from "@/api/tool";
 import type { BuiltinToolResp, McpServerResp, ToolResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
 import ToolPolicyEditor from "@/components/ToolPolicyEditor.vue";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
 
 const router = useRouter();
+const auth = useAuthStore();
+const canEdit = computed(() => auth.hasPermission(PERM.TOOL_EDIT));
+const canControl = computed(() => auth.hasPermission(PERM.TOOL_CONTROL));
 
 const keyword = ref("");
 const filterSource = ref("all");

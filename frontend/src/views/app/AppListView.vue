@@ -7,7 +7,7 @@
           按应用类型分类管理 — 不同类型对应不同的能力与配置
         </p>
       </div>
-      <a-button type="primary" class="app-head-btn" @click="onCreate">
+      <a-button v-if="canEdit" type="primary" class="app-head-btn" @click="onCreate">
         <template #icon><PlusOutlined /></template>
         创建{{ activeTypeMeta.label }}
       </a-button>
@@ -32,6 +32,14 @@
         :placeholder="`搜索 ${activeTypeMeta.label} 应用...`"
         allow-clear
         @search="onSearch"
+      />
+      <a-select
+        v-model:value="filterCategoryId"
+        class="category-filter"
+        placeholder="按分类筛选"
+        allow-clear
+        :options="categoryOptions"
+        @change="onSearch"
       />
       <div class="filter-row">
         <button
@@ -60,13 +68,19 @@
               <span :class="['app-status-dot', `app-status--${app.app_status}`]" />
               <span class="app-status-text">{{ statusLabel[app.app_status] || app.app_status }}</span>
             </div>
-            <a-popconfirm title="确定删除该应用？" @confirm="onDelete(app)">
+            <a-popconfirm v-if="canEdit" title="确定删除该应用？" @confirm="onDelete(app)">
               <a-button type="text" size="small" danger @click.stop>删除</a-button>
             </a-popconfirm>
           </div>
 
           <h4 class="app-card-name">{{ app.name }}</h4>
           <p class="app-card-desc">{{ app.description || "暂无描述" }}</p>
+
+          <div v-if="app.categories && app.categories.length" class="app-card-tags">
+            <a-tag v-for="c in app.categories" :key="c.id" size="small" color="blue">
+              {{ c.name }}
+            </a-tag>
+          </div>
 
           <div class="app-card-meta">
             <span class="app-card-meta-item">模型 {{ app.model || "-" }}</span>
@@ -84,7 +98,7 @@
         :description="`暂无 ${activeTypeMeta.label} 应用`"
         class="empty-block"
       >
-        <a-button type="primary" @click="onCreate">
+        <a-button v-if="canEdit" type="primary" @click="onCreate">
           创建第一个 {{ activeTypeMeta.label }}
         </a-button>
       </a-empty>
@@ -109,8 +123,14 @@ import { useRouter } from "vue-router";
 import { PlusOutlined } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
 import * as appApi from "@/api/app";
-import type { AppResp } from "@/api/types";
+import * as categoryApi from "@/api/appCategory";
+import type { AppCategoryResp, AppResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
+
+const auth = useAuthStore();
+const canEdit = computed(() => auth.hasPermission(PERM.APP_EDIT));
 
 const router = useRouter();
 
@@ -129,12 +149,18 @@ const TYPE_ORDER: AppType[] = ["agent", "agent_flow", "llm", "rag", "nl2sql"];
 const activeType = ref<AppType>("agent");
 const keyword = ref("");
 const filterStatus = ref("");
+const filterCategoryId = ref<string | undefined>(undefined);
 const list = ref<AppResp[]>([]);
 const total = ref(0);
 const loading = ref(false);
 const pageNo = ref(1);
 const pageSize = ref(20);
 const countMap = ref<Record<string, number>>({});
+const categories = ref<AppCategoryResp[]>([]);
+
+const categoryOptions = computed(() =>
+  categories.value.map((c) => ({ value: c.id, label: c.name }))
+);
 
 const statusLabel: Record<string, string> = {
   draft: "草稿",
@@ -177,12 +203,18 @@ async function loadList() {
       keyword: keyword.value || undefined,
       app_type: activeType.value,
       app_status: filterStatus.value || undefined,
+      category_id: filterCategoryId.value || undefined,
     });
     list.value = data.data;
     total.value = data.total;
   } finally {
     loading.value = false;
   }
+}
+
+async function loadCategories() {
+  const { data } = await categoryApi.listAppCategory();
+  categories.value = data.data;
 }
 
 function onSearch() {
@@ -194,6 +226,7 @@ function onSearch() {
 function onTabChange() {
   pageNo.value = 1;
   filterStatus.value = "";
+  filterCategoryId.value = undefined;
   void loadList();
 }
 
@@ -214,7 +247,7 @@ async function onDelete(app: AppResp) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadList(), loadSummary()]);
+  await Promise.all([loadList(), loadSummary(), loadCategories()]);
 });
 </script>
 
@@ -341,6 +374,11 @@ onMounted(async () => {
   flex: 0 1 280px;
 }
 
+.category-filter {
+  width: 200px;
+  min-width: 160px;
+}
+
 .filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -442,6 +480,13 @@ onMounted(async () => {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.app-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
 }
 
 .app-card-meta {

@@ -6,10 +6,10 @@
         返回
       </a-button>
       <div class="topbar-actions">
-        <a-button @click="router.push(`/skill/${skillId}/edit`)">编辑技能</a-button>
-        <a-button v-if="skill?.skill_status === 'enabled'" danger @click="onDisable">禁用</a-button>
-        <a-button v-else type="primary" ghost class="enable-btn" @click="onEnable">启用</a-button>
-        <a-popconfirm title="确定删除该技能？" @confirm="onDelete">
+        <a-button v-if="canEdit" @click="router.push(`/skill/${skillId}/edit`)">编辑技能</a-button>
+        <a-button v-if="canPublish && skill?.skill_status === 'enabled'" danger @click="onDisable">禁用</a-button>
+        <a-button v-else-if="canPublish" type="primary" ghost class="enable-btn" @click="onEnable">启用</a-button>
+        <a-popconfirm v-if="canEdit" title="确定删除该技能？" @confirm="onDelete">
           <a-button danger>删除</a-button>
         </a-popconfirm>
       </div>
@@ -25,7 +25,11 @@
           <div class="hero-body">
             <div class="hero-name-row">
               <h2 class="hero-name">{{ skill.name }}</h2>
-              <span v-if="skill.category" class="cat-tag">{{ skill.category }}</span>
+              <template v-if="skill.categories && skill.categories.length">
+                <span v-for="c in skill.categories" :key="c.id" class="cat-tag">
+                  {{ c.name }}
+                </span>
+              </template>
               <span :class="['status-badge', 'status-badge--' + skill.skill_status]">
                 <span :class="['status-dot', 'status-dot--' + skill.skill_status]" />
                 {{ statusLabel[skill.skill_status] }}
@@ -89,9 +93,14 @@ import { message } from "ant-design-vue";
 import * as skillApi from "@/api/skill";
 import type { SkillResp, SkillVersionResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
 
 const router = useRouter();
 const route = useRoute();
+const auth = useAuthStore();
+const canEdit = computed(() => auth.hasPermission(PERM.SKILL_EDIT));
+const canPublish = computed(() => auth.hasPermission(PERM.SKILL_PUBLISH));
 
 const skill = ref<SkillResp | null>(null);
 const versions = ref<SkillVersionResp[]>([]);

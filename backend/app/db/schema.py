@@ -116,13 +116,50 @@ class TbTool(Base):
     update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class TbAppCategory(Base):
+    __tablename__ = "tb_app_category"
+    __table_args__ = (UniqueConstraint("code", name="uk_tb_app_category_code"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    code: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+# 应用分类 — 目标（app / skill）多对多关系表
+# target_type: 'app' | 'skill'
+class TbAppCategoryRel(Base):
+    __tablename__ = "tb_app_category_rel"
+    __table_args__ = (
+        UniqueConstraint(
+            "category_id",
+            "target_type",
+            "target_id",
+            name="uk_tb_app_category_rel_uniq",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    category_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class TbSkill(Base):
     __tablename__ = "tb_skill"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category: Mapped[str | None] = mapped_column(String(255), nullable=True)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     skill_status: Mapped[str] = mapped_column(String(255), nullable=False)
     current_version: Mapped[str | None] = mapped_column(String(255), nullable=True)

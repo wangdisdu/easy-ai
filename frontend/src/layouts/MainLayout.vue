@@ -108,7 +108,7 @@
                 <span class="header-user-avatar">{{ userInitial }}</span>
                 <span class="header-user-meta">
                   <span class="header-user-name">{{ auth.user?.account ?? "用户" }}</span>
-                  <span class="header-user-role">管理员</span>
+                  <span class="header-user-role">{{ userRoleLabel }}</span>
                 </span>
                 <DownOutlined class="header-user-chevron" />
               </a-button>
@@ -162,6 +162,7 @@ type MenuMeta = {
   icon: IconKey;
   order: number;
 };
+type RouteMetaExt = { menu?: MenuMeta; permissions?: string[] };
 type MenuItem = {
   path: string;
   title: string;
@@ -175,10 +176,21 @@ const breadcrumbItems = computed(() => {
 
 const userInitial = computed(() => (auth.user?.account?.trim().charAt(0) ?? "用").toUpperCase());
 
+const userRoleLabel = computed(() => {
+  if (auth.isSuperAdmin) return "超级管理员";
+  const names = auth.user?.roles?.map((r) => r.name).filter(Boolean) ?? [];
+  return names.length ? names.join(" / ") : "普通用户";
+});
+
 const menuItems = computed<MenuItem[]>(() =>
   router
     .getRoutes()
-    .filter((record: RouteRecordNormalized) => Boolean((record.meta as { menu?: MenuMeta }).menu))
+    .filter((record: RouteRecordNormalized) => {
+      const meta = record.meta as RouteMetaExt;
+      if (!meta.menu) return false;
+      const required = meta.permissions ?? [];
+      return required.length === 0 || auth.hasAnyPermission(required);
+    })
     .sort((a, b) => {
       const aMenu = (a.meta as { menu: MenuMeta }).menu;
       const bMenu = (b.meta as { menu: MenuMeta }).menu;

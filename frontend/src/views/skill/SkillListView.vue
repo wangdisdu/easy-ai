@@ -5,7 +5,7 @@
         <h2 class="skill-page-title">技能管理</h2>
         <p class="skill-page-sub">管理智能体可调用的技能模块，配置技能参数与工具绑定</p>
       </div>
-      <a-button type="primary" class="skill-head-btn" @click="router.push('/skill/create')">
+      <a-button v-if="canEdit" type="primary" class="skill-head-btn" @click="router.push('/skill/create')">
         <template #icon><PlusOutlined /></template>
         创建技能
       </a-button>
@@ -22,18 +22,18 @@
       />
       <div class="filter-chips">
         <button
-          :class="['filter-chip', { 'filter-chip--active': filterCategory === '' }]"
+          :class="['filter-chip', { 'filter-chip--active': filterCategoryId === '' }]"
           @click="selectCategory('')"
         >
           全部
         </button>
         <button
           v-for="cat in categories"
-          :key="cat"
-          :class="['filter-chip', { 'filter-chip--active': filterCategory === cat }]"
-          @click="selectCategory(cat)"
+          :key="cat.id"
+          :class="['filter-chip', { 'filter-chip--active': filterCategoryId === cat.id }]"
+          @click="selectCategory(cat.id)"
         >
-          {{ cat }}
+          {{ cat.name }}
         </button>
       </div>
     </div>
@@ -53,7 +53,11 @@
             </div>
             <div class="skill-card-info">
               <h4 class="skill-card-name">{{ skill.name }}</h4>
-              <span v-if="skill.category" class="cat-tag">{{ skill.category }}</span>
+              <div v-if="skill.categories && skill.categories.length" class="cat-tags">
+                <span v-for="c in skill.categories" :key="c.id" class="cat-tag">
+                  {{ c.name }}
+                </span>
+              </div>
             </div>
             <span class="skill-card-status">
               <span :class="['status-dot', 'status-dot--' + skill.skill_status]" />
@@ -90,23 +94,28 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { PlusOutlined, ThunderboltOutlined, ToolOutlined } from "@ant-design/icons-vue";
+import * as categoryApi from "@/api/appCategory";
 import * as skillApi from "@/api/skill";
-import type { SkillResp } from "@/api/types";
+import type { AppCategoryResp, SkillResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
 
 const router = useRouter();
+const auth = useAuthStore();
+const canEdit = computed(() => auth.hasPermission(PERM.SKILL_EDIT));
 
 const keyword = ref("");
-const filterCategory = ref("");
+const filterCategoryId = ref("");
 const list = ref<SkillResp[]>([]);
 const total = ref(0);
 const loading = ref(false);
 const pageNo = ref(1);
 const pageSize = ref(20);
-const categories = ref<string[]>([]);
+const categories = ref<AppCategoryResp[]>([]);
 
 const statusLabel: Record<string, string> = {
   enabled: "已启用",
@@ -114,8 +123,8 @@ const statusLabel: Record<string, string> = {
   draft: "草稿",
 };
 
-function selectCategory(cat: string) {
-  filterCategory.value = cat;
+function selectCategory(id: string) {
+  filterCategoryId.value = id;
   pageNo.value = 1;
   loadList();
 }
@@ -132,7 +141,7 @@ async function loadList() {
       page_no: pageNo.value,
       page_size: pageSize.value,
       keyword: keyword.value || undefined,
-      category: filterCategory.value || undefined,
+      category_id: filterCategoryId.value || undefined,
     });
     list.value = data.data;
     total.value = data.total;
@@ -142,7 +151,7 @@ async function loadList() {
 }
 
 async function loadCategories() {
-  const { data } = await skillApi.listCategories();
+  const { data } = await categoryApi.listAppCategory();
   categories.value = data.data;
 }
 
@@ -183,7 +192,8 @@ onMounted(() => {
 .skill-card-info { flex: 1; min-width: 0; }
 .skill-card-name { margin: 0; font-size: 15px; font-weight: 700; color: var(--color-text); }
 
-.cat-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 10px; font-weight: 600; margin-top: 4px; background: var(--color-violet-bg); color: var(--color-accent); }
+.cat-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.cat-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 10px; font-weight: 600; background: var(--color-violet-bg); color: var(--color-accent); }
 
 .skill-card-status { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .status-dot { width: 8px; height: 8px; border-radius: 999px; }

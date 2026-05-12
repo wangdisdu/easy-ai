@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends
 
 from app.api.app_api import router as app_router
+from app.api.app_category_api import router as app_category_router
 from app.api.auth_api import router as auth_router
 from app.api.conversation_api import router as conversation_router
 from app.api.llm_api import router as llm_router
 from app.api.memory_api import router as memory_router
 from app.api.observability_api import router as observability_router
 from app.api.open_api import router as open_router
+from app.api.permission_api import router as permission_router
 from app.api.policy_api import policy_router
 from app.api.policy_api import router as tool_policy_router
 from app.api.role_api import router as role_router
@@ -23,6 +25,8 @@ _login_required = [Depends(require_authenticated_user)]
 api_router.include_router(user_router, dependencies=_login_required)
 api_router.include_router(user_group_router, dependencies=_login_required)
 api_router.include_router(role_router, dependencies=_login_required)
+api_router.include_router(permission_router, dependencies=_login_required)
+api_router.include_router(app_category_router, dependencies=_login_required)
 api_router.include_router(app_router, dependencies=_login_required)
 api_router.include_router(open_router, dependencies=_login_required)
 api_router.include_router(skill_router, dependencies=_login_required)

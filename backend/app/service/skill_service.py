@@ -17,10 +17,9 @@ from app.model.skill_model import (
     SkillUpdateReq,
     SkillVersionResp,
 )
+from app.service.app_category_service import TARGET_SKILL, AppCategoryService
 
 VALID_STATUSES = {"enabled", "disabled", "draft"}
-
-DEFAULT_CATEGORIES = ["文本处理", "信息检索", "代码与推理", "数据处理", "多模态", "编排调度"]
 
 # 与 DeepAgents 内置 subagent 同名会顶替框架默认的 general-purpose 通用代理
 # （见 deepagents/graph.py 的 insert 判定）。大小写不敏感地拦截。
@@ -37,22 +36,14 @@ def _validate_skill_name(name: str | None) -> None:
         )
 
 
+def _to_int_ids(ids: list[str]) -> list[int]:
+    return [int(x) for x in ids if str(x).strip()]
+
+
 class SkillService:
     def __init__(self, id_generator: SnowflakeGenerator) -> None:
         self._id_generator = id_generator
-
-    # ── Categories (merge defaults + DB distinct values) ──
-
-    def list_categories(self, db: Session) -> list[str]:
-        rows = db.scalars(
-            select(TbSkill.category).where(TbSkill.category.isnot(None), TbSkill.category != "")
-        ).all()
-        db_cats = set(rows)
-        merged = list(DEFAULT_CATEGORIES)
-        for c in sorted(db_cats):
-            if c not in merged:
-                merged.append(c)
-        return merged
+        self._category_service = AppCategoryService(id_generator)
 
     # ── Helpers ──
 
@@ -101,7 +92,6 @@ class SkillService:
             id=self._id_generator.next_id(),
             name=req.name,
             description=req.description,
-            category=req.category,
             instruction=req.instruction,
             skill_status="draft",
             current_version=None,
@@ -111,12 +101,20 @@ class SkillService:
             update_user=req_ctx.user_id,
         )
         db.add(entity)
+        db.flush()
         if req.tools:
             self._sync_skill_tools(db, entity.id, req.tools, now, req_ctx.user_id)
+        if req.category_ids is not None:
+            self._category_service.sync_relations(
+                db, TARGET_SKILL, entity.id, _to_int_ids(req.category_ids), req_ctx
+            )
         db.commit()
         db.refresh(entity)
         tools_map = self._load_skill_tools(db, [entity.id])
-        return SkillResp.from_entity(entity, tools_map.get(entity.id, []))
+        refs_map = self._category_service.load_refs_map(db, TARGET_SKILL, [entity.id])
+        return SkillResp.from_entity(
+            entity, tools_map.get(entity.id, []), refs_map.get(entity.id, [])
+        )
 
     def page_skill(self, db: Session, req: SkillPageReq) -> tuple[list[SkillResp], int]:
         stmt = select(TbSkill)
@@ -126,8 +124,13 @@ class SkillService:
         if req.keyword:
             kw = f"%{req.keyword}%"
             conditions.append(or_(TbSkill.name.like(kw), TbSkill.description.like(kw)))
-        if req.category:
-            conditions.append(TbSkill.category == req.category)
+        if req.category_id:
+            target_ids = self._category_service.target_ids_by_category(
+                db, TARGET_SKILL, int(req.category_id)
+            )
+            if not target_ids:
+                return [], 0
+            conditions.append(TbSkill.id.in_(target_ids))
         if req.skill_status:
             conditions.append(TbSkill.skill_status == req.skill_status)
 
@@ -143,14 +146,20 @@ class SkillService:
 
         skill_ids = [r.id for r in rows]
         tools_map = self._load_skill_tools(db, skill_ids)
-        return [SkillResp.from_entity(r, tools_map.get(r.id, [])) for r in rows], total
+        refs_map = self._category_service.load_refs_map(db, TARGET_SKILL, skill_ids)
+        return [
+            SkillResp.from_entity(r, tools_map.get(r.id, []), refs_map.get(r.id, [])) for r in rows
+        ], total
 
     def get_skill_by_id(self, db: Session, skill_id: int) -> SkillResp:
         entity = db.get(TbSkill, skill_id)
         if not entity:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "skill not found")
         tools_map = self._load_skill_tools(db, [entity.id])
-        return SkillResp.from_entity(entity, tools_map.get(entity.id, []))
+        refs_map = self._category_service.load_refs_map(db, TARGET_SKILL, [entity.id])
+        return SkillResp.from_entity(
+            entity, tools_map.get(entity.id, []), refs_map.get(entity.id, [])
+        )
 
     def update_skill(
         self, db: Session, skill_id: int, req: SkillUpdateReq, req_ctx: RequestContext
@@ -164,21 +173,26 @@ class SkillService:
             entity.name = req.name
         if req.description is not None:
             entity.description = req.description
-        if req.category is not None:
-            entity.category = req.category
         if req.instruction is not None:
             entity.instruction = req.instruction
 
         now = req_ctx.request_time_ms
         if req.tools is not None:
             self._sync_skill_tools(db, skill_id, req.tools, now, req_ctx.user_id)
+        if req.category_ids is not None:
+            self._category_service.sync_relations(
+                db, TARGET_SKILL, skill_id, _to_int_ids(req.category_ids), req_ctx
+            )
 
         entity.update_time = now
         entity.update_user = req_ctx.user_id
         db.commit()
         db.refresh(entity)
         tools_map = self._load_skill_tools(db, [entity.id])
-        return SkillResp.from_entity(entity, tools_map.get(entity.id, []))
+        refs_map = self._category_service.load_refs_map(db, TARGET_SKILL, [entity.id])
+        return SkillResp.from_entity(
+            entity, tools_map.get(entity.id, []), refs_map.get(entity.id, [])
+        )
 
     def delete_skill(self, db: Session, skill_id: int) -> None:
         entity = db.get(TbSkill, skill_id)
@@ -186,6 +200,7 @@ class SkillService:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "skill not found")
         db.query(TbSkillTool).filter(TbSkillTool.skill_id == skill_id).delete()
         db.query(TbSkillVersion).filter(TbSkillVersion.skill_id == skill_id).delete()
+        self._category_service.delete_relations_for_target(db, TARGET_SKILL, skill_id)
         db.delete(entity)
         db.commit()
 
@@ -203,7 +218,10 @@ class SkillService:
         db.commit()
         db.refresh(entity)
         tools_map = self._load_skill_tools(db, [entity.id])
-        return SkillResp.from_entity(entity, tools_map.get(entity.id, []))
+        refs_map = self._category_service.load_refs_map(db, TARGET_SKILL, [entity.id])
+        return SkillResp.from_entity(
+            entity, tools_map.get(entity.id, []), refs_map.get(entity.id, [])
+        )
 
     # ── Publish ──
 
@@ -216,13 +234,16 @@ class SkillService:
 
         tools_map = self._load_skill_tools(db, [entity.id])
         tool_list = tools_map.get(entity.id, [])
+        category_ids = self._category_service.load_category_ids_map(
+            db, TARGET_SKILL, [entity.id]
+        ).get(entity.id, [])
 
         now = req_ctx.request_time_ms
         snapshot = json.dumps(
             {
                 "name": entity.name,
                 "description": entity.description,
-                "category": entity.category,
+                "category_ids": category_ids,
                 "instruction": entity.instruction,
                 "tools": [
                     {"tool_source": t.tool_source, "tool_name": t.tool_name, "tool_id": t.tool_id}

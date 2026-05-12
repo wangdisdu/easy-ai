@@ -32,6 +32,7 @@ from app.model.app_model import (
     parse_app_config,
     parse_model_setting,
 )
+from app.service.app_category_service import TARGET_APP, AppCategoryService
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ VALID_ACCESS_SCOPES = {"internal", "api", "embed"}
 class AppService:
     def __init__(self, id_generator: SnowflakeGenerator) -> None:
         self._id_generator = id_generator
+        self._category_service = AppCategoryService(id_generator)
 
     def create_app(self, db: Session, req: AppCreateReq, req_ctx: RequestContext) -> AppResp:
         app_type = normalize_app_type(req.app_type)
@@ -98,6 +100,10 @@ class AppService:
         db.add(entity)
         db.flush()
         self._sync_app_bindings(db, entity.id, app_type, req.tool_ids, req.skill_ids, req_ctx)
+        if req.category_ids is not None:
+            self._category_service.sync_relations(
+                db, TARGET_APP, entity.id, _to_int_ids(req.category_ids), req_ctx
+            )
         try:
             db.commit()
         except Exception:
@@ -123,6 +129,13 @@ class AppService:
             if req.app_status not in VALID_STATUSES:
                 raise ServiceError(ErrorCode.BAD_REQUEST, f"invalid app_status: {req.app_status}")
             conditions.append(TbApp.app_status == req.app_status)
+        if req.category_id:
+            target_ids = self._category_service.target_ids_by_category(
+                db, TARGET_APP, int(req.category_id)
+            )
+            if not target_ids:
+                return [], 0
+            conditions.append(TbApp.id.in_(target_ids))
 
         for cond in conditions:
             stmt = stmt.where(cond)
@@ -202,6 +215,10 @@ class AppService:
             req.skill_ids,
             req_ctx,
         )
+        if req.category_ids is not None:
+            self._category_service.sync_relations(
+                db, TARGET_APP, app_id, _to_int_ids(req.category_ids), req_ctx
+            )
         entity.update_time = req_ctx.request_time_ms
         entity.update_user = req_ctx.user_id
         db.commit()
@@ -227,6 +244,7 @@ class AppService:
         db.query(TbAppVersion).filter(TbAppVersion.app_id == app_id).delete()
         db.query(TbAppTool).filter(TbAppTool.app_id == app_id).delete()
         db.query(TbAppSkill).filter(TbAppSkill.app_id == app_id).delete()
+        self._category_service.delete_relations_for_target(db, TARGET_APP, app_id)
         db.delete(entity)
         db.commit()
         # best-effort:本地删除成功后再清 Flowise 侧,失败仅 warn(已在 client 内打日志)
@@ -250,6 +268,9 @@ class AppService:
             "app_config": parse_app_config(entity.app_config),
             "tool_ids": self._load_tool_ids(db, entity.id),
             "skill_ids": self._load_skill_ids(db, entity.id),
+            "category_ids": self._category_service.load_category_ids_map(
+                db, TARGET_APP, [entity.id]
+            ).get(entity.id, []),
             "provider_id": entity.provider_id,
             "model_id": entity.model_id,
             "model": entity.model,
@@ -357,12 +378,17 @@ class AppService:
         if normalize_app_type(entity.app_type) == "agent":
             app.tool_ids = self._load_tool_ids(db, entity.id)
             app.skill_ids = self._load_skill_ids(db, entity.id)
+        refs = self._category_service.load_refs_map(db, TARGET_APP, [entity.id]).get(entity.id, [])
+        app.categories = refs
+        app.category_ids = [c.id for c in refs]
         return app
 
     def _to_app_resp_list(self, db: Session, rows: list[TbApp]) -> list[AppResp]:
         agent_app_ids = [row.id for row in rows if normalize_app_type(row.app_type) == "agent"]
         tool_ids_map = self._load_tool_ids_map(db, agent_app_ids)
         skill_ids_map = self._load_skill_ids_map(db, agent_app_ids)
+        all_ids = [row.id for row in rows]
+        refs_map = self._category_service.load_refs_map(db, TARGET_APP, all_ids)
 
         result: list[AppResp] = []
         for row in rows:
@@ -370,6 +396,9 @@ class AppService:
             if normalize_app_type(row.app_type) == "agent":
                 app.tool_ids = tool_ids_map.get(row.id, [])
                 app.skill_ids = skill_ids_map.get(row.id, [])
+            refs = refs_map.get(row.id, [])
+            app.categories = refs
+            app.category_ids = [c.id for c in refs]
             result.append(app)
         return result
 
@@ -510,3 +539,7 @@ class AppService:
                     update_user=user_id,
                 )
             )
+
+
+def _to_int_ids(ids: list[str]) -> list[int]:
+    return [int(x) for x in ids if str(x).strip()]

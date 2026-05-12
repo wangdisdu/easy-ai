@@ -30,6 +30,7 @@ def page_app(
     keyword: str | None = Query(default=None),
     app_type: str | None = Query(default=None),
     app_status: str | None = Query(default=None),
+    category_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PagedResp[AppResp]:
     data, total = service.page_app(
@@ -40,6 +41,7 @@ def page_app(
             keyword=keyword,
             app_type=app_type,
             app_status=app_status,
+            category_id=category_id,
         ),
     )
     return PagedResp(data=data, total=total)

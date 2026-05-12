@@ -149,6 +149,40 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
             "required": ["path", "content"],
         },
     ),
+    BuiltinToolResp(
+        tool_name="remember",
+        description="记下一条关于当前用户的长期事实或偏好，下次对话仍可读取（scope=user，仅限当前用户）",
+        parameters={
+            "type": "object",
+            "properties": {
+                "memory_key": {
+                    "type": "string",
+                    "description": "唯一键，dot 命名空间，如 language.preference、profile.email",
+                },
+                "memory_value": {
+                    "type": "string",
+                    "description": "纯文本短句，不要超过 300 字；已存在的 key 会被覆盖",
+                },
+            },
+            "required": ["memory_key", "memory_value"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="forget",
+        description="删除一条之前记下的用户记忆（scope=user，仅限当前用户）",
+        parameters={
+            "type": "object",
+            "properties": {
+                "memory_key": {"type": "string", "description": "要删除的记忆键"},
+            },
+            "required": ["memory_key"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="list_my_memories",
+        description="查看当前用户已记下的全部长期记忆（key:value 列表）",
+        parameters={"type": "object", "properties": {}, "required": []},
+    ),
 ]
 
 

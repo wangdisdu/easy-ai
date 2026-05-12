@@ -8,8 +8,11 @@
     </div>
 
     <a-tabs :active-key="activeTab" size="large" class="setting-tabs" @change="onTabChange">
-      <a-tab-pane key="llm" tab="大模型管理">
+      <a-tab-pane v-if="canLlm" key="llm" tab="大模型管理">
         <LlmManageView />
+      </a-tab-pane>
+      <a-tab-pane v-if="canSetting" key="category" tab="分类管理">
+        <CategoryManageView />
       </a-tab-pane>
     </a-tabs>
   </div>
@@ -19,19 +22,25 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import LlmManageView from "@/views/setting/LlmManageView.vue";
+import CategoryManageView from "@/views/setting/CategoryManageView.vue";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
 
-type TabKey = "llm";
+type TabKey = "llm" | "category";
 
 const route = useRoute();
 const router = useRouter();
-const tabKeys: TabKey[] = ["llm"];
+const auth = useAuthStore();
+const canLlm = computed(() => auth.hasPermission(PERM.SYSTEM_LLM));
+const canSetting = computed(() => auth.hasPermission(PERM.SYSTEM_SETTING));
+const tabKeys: TabKey[] = ["llm", "category"];
 
 const activeTab = computed<TabKey>(() => {
   const tab = route.query.tab;
   if (typeof tab === "string" && tabKeys.includes(tab as TabKey)) {
     return tab as TabKey;
   }
-  return "llm";
+  return canLlm.value ? "llm" : "category";
 });
 
 function onTabChange(tab: string) {

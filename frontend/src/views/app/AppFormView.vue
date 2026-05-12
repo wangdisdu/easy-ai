@@ -50,6 +50,16 @@
           <a-form-item label="应用名称" name="name">
             <a-input v-model:value="formModel.name" placeholder="请输入应用名称" />
           </a-form-item>
+          <a-form-item label="分类" name="category_ids">
+            <a-select
+              v-model:value="formModel.category_ids"
+              mode="multiple"
+              placeholder="选择应用分类（可多选）"
+              :options="categoryOptions"
+              option-filter-prop="label"
+              allow-clear
+            />
+          </a-form-item>
           <a-form-item label="应用描述" name="description">
             <a-textarea v-model:value="formModel.description" :rows="3" placeholder="请输入应用描述" />
           </a-form-item>
@@ -416,6 +426,7 @@ import { ArrowLeftOutlined } from "@ant-design/icons-vue";
 import type { FormInstance, Rule } from "ant-design-vue/es/form";
 import { message } from "ant-design-vue";
 import * as appApi from "@/api/app";
+import * as categoryApi from "@/api/appCategory";
 import * as llmApi from "@/api/llm";
 import * as skillApi from "@/api/skill";
 import * as toolApi from "@/api/tool";
@@ -449,6 +460,7 @@ const submitting = ref(false);
 const providerList = ref<LlmProviderResp[]>([]);
 const toolOptions = ref<Array<{ label: string; value: string }>>([]);
 const skillOptions = ref<Array<{ label: string; value: string }>>([]);
+const categoryOptions = ref<Array<{ label: string; value: string }>>([]);
 
 const appTypeLabel: Record<AppType, string> = {
   llm: "LLM 应用",
@@ -522,6 +534,7 @@ const formModel = reactive({
   name: "",
   description: "",
   app_type: "" as AppType | "",
+  category_ids: [] as string[],
   provider_id: undefined as string | undefined,
   model_id: undefined as string | undefined,
   access_scope: "internal",
@@ -666,6 +679,7 @@ function fillFromApp(app: AppResp) {
   formModel.name = app.name;
   formModel.description = app.description || "";
   formModel.app_type = app.app_type as AppType;
+  formModel.category_ids = (app.category_ids || []).slice();
   formModel.provider_id = app.provider_id || undefined;
   formModel.model_id = app.model_id || undefined;
   formModel.access_scope = app.access_scope || "internal";
@@ -723,10 +737,16 @@ function fillFromApp(app: AppResp) {
 }
 
 async function loadDependencies() {
-  const [{ data: providerData }, { data: toolData }, { data: skillData }] = await Promise.all([
+  const [
+    { data: providerData },
+    { data: toolData },
+    { data: skillData },
+    { data: categoryData },
+  ] = await Promise.all([
     llmApi.pageProvider({ page_no: 1, page_size: 200 }),
     toolApi.pageTool({ page_no: 1, page_size: 1000, tool_status: "enabled" }),
     skillApi.pageSkill({ page_no: 1, page_size: 1000, skill_status: "enabled" }),
+    categoryApi.listAppCategory(),
   ]);
   providerList.value = providerData.data.filter((item) => item.models.length > 0);
   toolOptions.value = toolData.data.map((item) => ({
@@ -734,6 +754,10 @@ async function loadDependencies() {
     value: item.id,
   }));
   skillOptions.value = skillData.data.map((item) => ({
+    label: item.name,
+    value: item.id,
+  }));
+  categoryOptions.value = categoryData.data.map((item) => ({
     label: item.name,
     value: item.id,
   }));
@@ -762,6 +786,7 @@ async function submitForm() {
       name: formModel.name,
       description: formModel.description || undefined,
       app_type: formModel.app_type,
+      category_ids: formModel.category_ids.slice(),
       provider_id: formModel.provider_id,
       model_id: formModel.model_id,
       model_setting: formModel.app_type !== "agent_flow" ? buildModelSetting() : undefined,

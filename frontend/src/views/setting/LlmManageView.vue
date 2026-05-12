@@ -71,7 +71,7 @@
           <!-- Models table -->
           <div class="llm-section-label">
             <span>已注册模型</span>
-            <a-button type="link" size="small" @click="openAddModel(provider)">
+            <a-button v-if="canEdit" type="link" size="small" @click="openAddModel(provider)">
               <template #icon><PlusOutlined /></template>
               添加模型
             </a-button>
@@ -102,7 +102,7 @@
                 </a-tag>
               </template>
               <template v-else-if="column.key === 'actions'">
-                <a-space>
+                <a-space v-if="canEdit">
                   <a-button
                     v-if="record.status === 'active'"
                     type="link"
@@ -123,12 +123,13 @@
                     <a-button type="link" size="small" danger>删除</a-button>
                   </a-popconfirm>
                 </a-space>
+                <span v-else class="llm-tokens-unset">—</span>
               </template>
             </template>
           </a-table>
 
           <!-- Actions -->
-          <div class="llm-detail-actions">
+          <div v-if="canEdit" class="llm-detail-actions">
             <a-button type="primary" :loading="testing" ghost @click="onTestConnection(provider)">
               测试连接
             </a-button>
@@ -147,7 +148,7 @@
     </div>
 
     <!-- Add provider button -->
-    <a-button type="dashed" block class="llm-add-provider-btn" @click="openCreateProvider">
+    <a-button v-if="canEdit" type="dashed" block class="llm-add-provider-btn" @click="openCreateProvider">
       <template #icon><PlusOutlined /></template>
       添加模型供应商
     </a-button>
@@ -259,12 +260,17 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import type { FormInstance, Rule } from "ant-design-vue/es/form";
 import { message } from "ant-design-vue";
 import { DownOutlined, PlusOutlined } from "@ant-design/icons-vue";
 import * as api from "@/api/llm";
 import type { LlmProviderResp, LlmModelResp } from "@/api/types";
+import { useAuthStore } from "@/stores/auth";
+import { PERM } from "@/utils/permission";
+
+const auth = useAuthStore();
+const canEdit = computed(() => auth.hasPermission(PERM.SYSTEM_LLM));
 
 const modelTypes = ["LLM", "Embedding", "Rerank", "Vision", "OCR"];
 const modelTypeColor: Record<string, string> = {

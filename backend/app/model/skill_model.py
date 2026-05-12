@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from app.db.schema import TbSkill, TbSkillVersion
+from app.model.app_category_model import AppCategoryRef
 
 # ── Skill Tool (binding) ──
 
@@ -22,7 +23,8 @@ _SKILL_NAME_PATTERN = r"^[a-z0-9-]+$"
 class SkillCreateReq(BaseModel):
     name: str = Field(min_length=1, max_length=64, pattern=_SKILL_NAME_PATTERN)
     description: str | None = Field(default=None)
-    category: str | None = Field(default=None, max_length=255)
+    # 关联的应用分类 ID 列表（多对多）
+    category_ids: list[str] | None = Field(default=None)
     instruction: str = Field(min_length=1)
     tools: list[SkillToolItem] = Field(default_factory=list)
 
@@ -30,7 +32,8 @@ class SkillCreateReq(BaseModel):
 class SkillUpdateReq(BaseModel):
     name: str | None = Field(default=None, max_length=64, pattern=_SKILL_NAME_PATTERN)
     description: str | None = Field(default=None)
-    category: str | None = Field(default=None, max_length=255)
+    # None 表示不更新，[] 表示清空
+    category_ids: list[str] | None = Field(default=None)
     instruction: str | None = Field(default=None)
     tools: list[SkillToolItem] | None = Field(default=None)
 
@@ -39,7 +42,7 @@ class SkillPageReq(BaseModel):
     page_no: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=10000)
     keyword: str | None = Field(default=None, max_length=255)
-    category: str | None = Field(default=None, max_length=255)
+    category_id: str | None = Field(default=None)
     skill_status: str | None = Field(default=None, max_length=255)
 
 
@@ -58,7 +61,9 @@ class SkillResp(BaseModel):
     id: str
     name: str
     description: str | None = None
-    category: str | None = None
+    # 关联的应用分类
+    category_ids: list[str] = Field(default_factory=list)
+    categories: list[AppCategoryRef] = Field(default_factory=list)
     instruction: str
     skill_status: str
     current_version: str | None = None
@@ -67,12 +72,19 @@ class SkillResp(BaseModel):
     update_time: int
 
     @classmethod
-    def from_entity(cls, entity: TbSkill, tools: list[SkillToolResp] | None = None) -> SkillResp:
+    def from_entity(
+        cls,
+        entity: TbSkill,
+        tools: list[SkillToolResp] | None = None,
+        categories: list[AppCategoryRef] | None = None,
+    ) -> SkillResp:
+        cats = categories or []
         return cls(
             id=str(entity.id),
             name=entity.name,
             description=entity.description,
-            category=entity.category,
+            category_ids=[c.id for c in cats],
+            categories=cats,
             instruction=entity.instruction,
             skill_status=entity.skill_status,
             current_version=entity.current_version,

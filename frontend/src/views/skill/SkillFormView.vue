@@ -46,15 +46,17 @@
             <label class="form-label">技能分类</label>
             <div class="form-field">
               <a-select
-                v-model:value="form.category"
+                v-model:value="form.category_ids"
                 style="width: 100%"
-                placeholder="选择或输入自定义分类"
-                mode="tags"
-                :max-tag-count="1"
+                placeholder="选择应用分类（可多选）"
+                mode="multiple"
                 :options="categoryOptions"
-                @change="onCategoryChange"
+                option-filter-prop="label"
+                allow-clear
               />
-              <p class="form-hint">可选择已有分类或输入新分类，仅保留一个</p>
+              <p class="form-hint">
+                分类由系统配置 → 分类管理统一维护
+              </p>
             </div>
           </div>
         </div>
@@ -127,6 +129,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeftOutlined, CloseOutlined } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
+import * as categoryApi from "@/api/appCategory";
 import * as skillApi from "@/api/skill";
 import * as toolApi from "@/api/tool";
 import type { BuiltinToolResp, SkillToolItem, ToolResp } from "@/api/types";
@@ -143,16 +146,9 @@ const sourceLabel: Record<string, string> = { builtin: "内置", mcp: "MCP", api
 const form = reactive({
   name: "",
   description: "",
-  category: [] as string[],
+  category_ids: [] as string[],
   instruction: "",
 });
-
-function onCategoryChange(val: string[]) {
-  // keep only last selected
-  if (val.length > 1) {
-    form.category = [val[val.length - 1]];
-  }
-}
 
 // ── Tool binding ──
 
@@ -234,7 +230,7 @@ async function loadEditData() {
   const s = data.data;
   form.name = s.name;
   form.description = s.description || "";
-  form.category = s.category ? [s.category] : [];
+  form.category_ids = (s.category_ids || []).slice();
   form.instruction = s.instruction;
   selectedTools.value = [...s.tools];
 }
@@ -250,15 +246,13 @@ async function onSubmit() {
   }
   if (!form.instruction.trim()) { message.error("请填写技能说明"); return; }
 
-  const categoryValue = form.category.length > 0 ? form.category[0] : undefined;
-
   submitting.value = true;
   try {
     if (isEdit.value) {
       await skillApi.updateSkill(editId.value, {
         name: form.name,
         description: form.description || undefined,
-        category: categoryValue,
+        category_ids: form.category_ids.slice(),
         instruction: form.instruction,
         tools: selectedTools.value,
       });
@@ -267,7 +261,7 @@ async function onSubmit() {
       await skillApi.createSkill({
         name: form.name,
         description: form.description || undefined,
-        category: categoryValue,
+        category_ids: form.category_ids.slice(),
         instruction: form.instruction,
         tools: selectedTools.value,
       });
@@ -280,8 +274,8 @@ async function onSubmit() {
 }
 
 onMounted(async () => {
-  const { data } = await skillApi.listCategories();
-  categoryOptions.value = data.data.map((c) => ({ value: c, label: c }));
+  const { data } = await categoryApi.listAppCategory();
+  categoryOptions.value = data.data.map((c) => ({ value: c.id, label: c.name }));
   await loadAvailableTools();
   if (isEdit.value) await loadEditData();
 });

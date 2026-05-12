@@ -20,17 +20,12 @@ router = APIRouter(prefix="/skill", tags=["skill"])
 service = SkillService(SnowflakeGenerator(settings.snowflake_worker_id))
 
 
-@router.get("/category", response_model=Resp[list[str]])
-def list_categories(db: Session = Depends(get_db)) -> Resp[list[str]]:
-    return Resp(data=service.list_categories(db=db))
-
-
 @router.get("/page", response_model=PagedResp[SkillResp])
 def page_skill(
     page_no: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=10000),
     keyword: str | None = Query(default=None),
-    category: str | None = Query(default=None),
+    category_id: str | None = Query(default=None),
     skill_status: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PagedResp[SkillResp]:
@@ -40,7 +35,7 @@ def page_skill(
             page_no=page_no,
             page_size=page_size,
             keyword=keyword,
-            category=category,
+            category_id=category_id,
             skill_status=skill_status,
         ),
     )
