@@ -1,12 +1,17 @@
 # easy-ai 全栈 compose(单文件部署)
 #
-# 包含三部分:
+# 包含四部分:
 #   1. easy-ai 自研: easy-ai-backend / easy-ai-frontend / flowise
 #   2. Langfuse 应用: langfuse-web / langfuse-worker
-#   3. 基础设施: postgres / redis / clickhouse / minio
+#   3. RAGFlow 应用: ragflow / ragflow-mysql / ragflow-es
+#   4. 基础设施: postgres / redis / clickhouse / minio
 #
 # 宿主机端口统一在 188xx 段;仅 easy-ai-frontend 与 langfuse-web 绑定到
 # 0.0.0.0,其余组件全部绑定 127.0.0.1 仅本机可访问。
+#
+# RAGFlow 复用现网 minio (按 prefix 隔离) 与 redis (用 db=1),
+# 但其结构化数据库使用专用 ragflow-mysql、向量/全文检索使用专用 ragflow-es,
+# 避免与 easy-ai 自身的 postgres / clickhouse 互相干扰。
 #
 # 用法见 deploy.sh。
 
@@ -37,6 +42,10 @@ services:
       FLOWISE_INTERNAL_URL: http://flowise:3001
       FLOWISE_SHARED_SECRET: ${FLOWISE_SHARED_SECRET}
       FLOWISE_DEFAULT_WORKSPACE: ""
+      RAGFLOW_ENABLED: ${RAGFLOW_ENABLED:-true}
+      RAGFLOW_BASE_URL: http://ragflow:9380
+      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
+      RAGFLOW_TIMEOUT_SEC: ${RAGFLOW_TIMEOUT_SEC:-30}
     volumes:
       - easy-ai-data:/srv/easy-ai-backend/data
     depends_on:
@@ -44,6 +53,8 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+      ragflow:
+        condition: service_started
 
   easy-ai-frontend:
     build:
@@ -151,6 +162,122 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
 
   # ============================================================
+  # RAGFlow 应用(知识库底层引擎)
+  # ============================================================
+  # 部署形态:
+  # - 主服务 ragflow 暴露 :9380 (HTTP API) 与 :80 (Web UI)
+  # - 结构化数据用专用 ragflow-mysql,与 easy-ai-postgres 解耦
+  # - 全文/向量索引用专用 ragflow-es (Elasticsearch 8)
+  # - 对象存储复用现网 minio (按 user/前缀隔离)
+  # - 缓存复用现网 redis (使用 db=1)
+  # Embedding 模型由 easy-ai 的 LLM 管理外部 provider 提供, 不部署 TEI
+  ragflow:
+    image: ${RAGFLOW_IMAGE:-infiniflow/ragflow:v0.24.0}
+    container_name: easy-ai-ragflow
+    restart: unless-stopped
+    ports:
+      # 主 HTTP API,easy-ai-backend 调用入口;仅本机调试用
+      - "127.0.0.1:18040:9380"
+      # 内置 Web UI(运维直访,平台用户不使用)
+      - "127.0.0.1:18044:80"
+    environment:
+      # ── MySQL ──
+      MYSQL_HOST: ragflow-mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: root
+      MYSQL_PASSWORD: ${RAGFLOW_MYSQL_PASSWORD}
+      MYSQL_DBNAME: rag_flow
+      # ── Doc Engine: Elasticsearch ──
+      DOC_ENGINE: elasticsearch
+      ES_HOST: ragflow-es
+      ES_PORT: 9200
+      ES_USER: elastic
+      ELASTIC_PASSWORD: ${RAGFLOW_ES_PASSWORD}
+      # ── MinIO(复用 easy-ai-minio,按 user/前缀隔离)──
+      MINIO_HOST: minio
+      MINIO_USER: ${MINIO_ROOT_USER}
+      MINIO_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_PREFIX_PATH: ragflow/
+      # ── Redis(复用 easy-ai-redis,RAGFlow 内部使用 db=1)──
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_AUTH}
+      # ── 其他 ──
+      TZ: Asia/Shanghai
+      STACK_VERSION: 8.11.3
+    volumes:
+      - ragflow-logs:/ragflow/logs
+    depends_on:
+      ragflow-mysql:
+        condition: service_healthy
+      ragflow-es:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  ragflow-mysql:
+    image: mysql:8.0.39
+    container_name: easy-ai-ragflow-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${RAGFLOW_MYSQL_PASSWORD}
+    command:
+      --max_connections=1000
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+      --tls_version=TLSv1.2,TLSv1.3
+      --init-file=/data/application/init.sql
+      --binlog_expire_logs_seconds=604800
+    ports:
+      - "127.0.0.1:18045:3306"
+    volumes:
+      - ragflow-mysql-data:/var/lib/mysql
+      - ./ragflow-init/init.sql:/data/application/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${RAGFLOW_MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  ragflow-es:
+    image: elasticsearch:8.11.3
+    container_name: easy-ai-ragflow-es
+    restart: unless-stopped
+    environment:
+      node.name: es01
+      ELASTIC_PASSWORD: ${RAGFLOW_ES_PASSWORD}
+      bootstrap.memory_lock: "false"
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      cluster.routing.allocation.disk.watermark.low: 5gb
+      cluster.routing.allocation.disk.watermark.high: 3gb
+      cluster.routing.allocation.disk.watermark.flood_stage: 2gb
+    mem_limit: ${RAGFLOW_ES_MEM_LIMIT:-4g}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "127.0.0.1:18041:9200"
+    volumes:
+      - ragflow-es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "curl -fsS -u elastic:${RAGFLOW_ES_PASSWORD} http://localhost:9200/_cluster/health || exit 1"
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  # ============================================================
   # 基础设施(仅 127.0.0.1,内网通信)
   # ============================================================
   postgres:
@@ -238,3 +365,6 @@ volumes:
   langfuse_clickhouse_data:
   langfuse_clickhouse_logs:
   langfuse_minio_data:
+  ragflow-logs:
+  ragflow-mysql-data:
+  ragflow-es-data:

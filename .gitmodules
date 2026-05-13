@@ -4,3 +4,6 @@
 [submodule "langfuse"]
 	path = langfuse
 	url = git@code.eoitek.net:monitor/jax/langfuse.git
+[submodule "ragflow"]
+	path = ragflow
+	url = git@github.com:infiniflow/ragflow.git
