@@ -125,7 +125,25 @@ const router = createRouter({
             menu: { title: "知识库管理", icon: "database", order: 5 },
             permissions: KB_ANY,
           },
-          component: () => import("@/views/MockFeatureView.vue"),
+          component: () => import("@/views/knowledge/KbListView.vue"),
+        },
+        {
+          path: "knowledge/import/:id",
+          name: "knowledge-import",
+          meta: { title: "上传文档", permissions: [PERM.KB_EDIT] },
+          component: () => import("@/views/knowledge/KbImportView.vue"),
+        },
+        {
+          path: "knowledge/:id",
+          name: "knowledge-detail",
+          meta: { title: "知识库详情", permissions: KB_ANY },
+          component: () => import("@/views/knowledge/KbDetailView.vue"),
+        },
+        {
+          path: "knowledge/:kbId/document/:docId/preview",
+          name: "knowledge-doc-preview",
+          meta: { title: "文档预览", permissions: KB_ANY },
+          component: () => import("@/views/knowledge/KbDocumentPreviewView.vue"),
         },
         {
           path: "memory",

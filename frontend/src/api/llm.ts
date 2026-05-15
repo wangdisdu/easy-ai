@@ -86,6 +86,10 @@ export function deleteModel(id: string) {
   return request.delete<ApiResp<boolean>>(`/api/v1/llm/model/${id}`);
 }
 
+export function resyncModel(id: string) {
+  return request.post<ApiResp<LlmModelResp>>(`/api/v1/llm/model/${id}/resync`);
+}
+
 export function getPredefinedProviders() {
   return request.get<ApiResp<Record<string, string>>>("/api/v1/llm/provider/predefined");
 }

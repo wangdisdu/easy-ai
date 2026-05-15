@@ -4,6 +4,9 @@ from app.api.app_api import router as app_router
 from app.api.app_category_api import router as app_category_router
 from app.api.auth_api import router as auth_router
 from app.api.conversation_api import router as conversation_router
+from app.api.kb_api import router as kb_router
+from app.api.kb_document_api import router as kb_document_router
+from app.api.kb_retrieve_api import router as kb_retrieve_router
 from app.api.llm_api import router as llm_router
 from app.api.memory_api import router as memory_router
 from app.api.observability_api import router as observability_router
@@ -13,6 +16,7 @@ from app.api.policy_api import policy_router
 from app.api.policy_api import router as tool_policy_router
 from app.api.role_api import router as role_router
 from app.api.skill_api import router as skill_router
+from app.api.system_setting_api import router as system_setting_router
 from app.api.tool_api import mcp_router
 from app.api.tool_api import router as tool_router
 from app.api.user_api import router as user_router
@@ -38,3 +42,8 @@ api_router.include_router(llm_router, dependencies=_login_required)
 api_router.include_router(observability_router, dependencies=_login_required)
 api_router.include_router(conversation_router, dependencies=_login_required)
 api_router.include_router(memory_router, dependencies=_login_required)
+api_router.include_router(system_setting_router, dependencies=_login_required)
+# /retrieve 必须在 /{kb_id} 前注册, 否则路由会把 "retrieve" 解析为 kb_id
+api_router.include_router(kb_retrieve_router, dependencies=_login_required)
+api_router.include_router(kb_document_router, dependencies=_login_required)
+api_router.include_router(kb_router, dependencies=_login_required)

@@ -18,8 +18,19 @@ from app.model.llm_model import (
     LlmProviderResp,
     LlmProviderUpdateReq,
 )
+from app.service import ragflow_llm_sync
 
-VALID_PROVIDER_TYPES = {"openai", "openai_compatible", "anthropic", "gemini", "azure", "ollama"}
+VALID_PROVIDER_TYPES = {
+    "openai",
+    "openai_compatible",
+    "anthropic",
+    "gemini",
+    "azure",
+    "ollama",
+    # dashscope 原生 API(走 dashscope SDK,base_url 装饰性):承载 OpenAI-compatible
+    # mode 不覆盖的能力如 rerank/高级 embedding,对应 RAGFlow 的 Tongyi-Qianwen factory
+    "tongyi",
+}
 VALID_MODEL_TYPES = {"LLM", "Embedding", "Rerank", "Vision", "OCR"}
 VALID_MODEL_STATUSES = {"active", "inactive"}
 LEGACY_PROVIDER_TYPE_MAP = {
@@ -27,9 +38,26 @@ LEGACY_PROVIDER_TYPE_MAP = {
     "Ollama": "ollama",
 }
 
+# tongyi(dashscope 原生)走 SDK 不走 /models 接口,这里登记常见模型作为
+# "获取可用模型"按钮的静态返回,避免 _fetch_provider_models 报错;新模型可
+# 由用户在"添加模型"对话框手动键入,前端 select 是 allowCreate 风格的。
+TONGYI_KNOWN_MODELS: tuple[str, ...] = (
+    "qwen-max",
+    "qwen-plus",
+    "qwen-turbo",
+    "qwen-vl-max",
+    "qwen-vl-plus",
+    "qwen3-vl-rerank",
+    "gte-rerank",
+    "gte-rerank-v2",
+    "text-embedding-v3",
+    "text-embedding-v4",
+)
+
 PREDEFINED_PROVIDERS: dict[str, str] = {
     "OpenAI": "https://api.openai.com/v1",
     "阿里云百炼": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "阿里云百炼(原生)": "https://dashscope.aliyuncs.com",
     "智谱模型": "https://open.bigmodel.cn/api/paas/v4",
     "火山引擎": "https://ark.cn-beijing.volces.com/api/v3",
     "硅基流动": "https://api.siliconflow.cn/v1",
@@ -96,6 +124,17 @@ class LlmService:
 
         db.commit()
         db.refresh(provider)
+
+        for m in req.models:
+            ragflow_llm_sync.schedule_sync_model_to_ragflow(
+                provider_type=provider.provider_type,
+                base_url=provider.base_url,
+                api_key=provider.api_key,
+                model_name=m.model,
+                model_type=m.model_type,
+                user_id=req_ctx.user_id,
+                max_tokens=m.max_input_tokens,
+            )
         return LlmProviderResp.from_entity(provider, model_resps)
 
     def page_provider(
@@ -162,9 +201,21 @@ class LlmService:
         entity = db.get(TbLlmProvider, provider_id)
         if not entity:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "provider not found")
+        models = db.scalars(
+            select(TbLlmModel).where(TbLlmModel.provider_id == provider_id)
+        ).all()
+        provider_type = entity.provider_type
+        model_snapshots = [(m.model, m.model_type) for m in models]
         db.query(TbLlmModel).filter(TbLlmModel.provider_id == provider_id).delete()
         db.delete(entity)
         db.commit()
+
+        for model_name, model_type in model_snapshots:
+            ragflow_llm_sync.schedule_unsync_model_from_ragflow(
+                provider_type=provider_type,
+                model_name=model_name,
+                model_type=model_type,
+            )
 
     def test_connection(
         self, db: Session, provider_id: int, req_ctx: RequestContext
@@ -218,6 +269,9 @@ class LlmService:
             return self._fetch_openai_compatible_models(entity)
         if provider_type == "ollama":
             return self._fetch_ollama_models(entity)
+        if provider_type == "tongyi":
+            # dashscope 原生没有公开 /models, 给个静态列表做引导
+            return list(TONGYI_KNOWN_MODELS)
         raise ValueError(f"unsupported provider_type: {entity.provider_type}")
 
     def _fetch_openai_compatible_models(self, entity: TbLlmProvider) -> list[str]:
@@ -328,6 +382,16 @@ class LlmService:
         db.add(entity)
         db.commit()
         db.refresh(entity)
+
+        ragflow_llm_sync.schedule_sync_model_to_ragflow(
+            provider_type=provider.provider_type,
+            base_url=provider.base_url,
+            api_key=provider.api_key,
+            model_name=entity.model,
+            model_type=entity.model_type,
+            user_id=req_ctx.user_id,
+            max_tokens=entity.max_input_tokens,
+        )
         return LlmModelResp.from_entity(entity)
 
     def update_model(
@@ -336,6 +400,9 @@ class LlmService:
         entity = db.get(TbLlmModel, model_id)
         if not entity:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "model not found")
+
+        old_model = entity.model
+        old_model_type = entity.model_type
 
         if req.model is not None:
             entity.model = req.model
@@ -349,6 +416,27 @@ class LlmService:
         entity.update_user = req_ctx.user_id
         db.commit()
         db.refresh(entity)
+
+        # 名称或类型变更时:先删旧 + 再加新;只改 max_input_tokens 不触发同步
+        identity_changed = entity.model != old_model or entity.model_type != old_model_type
+        if identity_changed:
+            provider = db.get(TbLlmProvider, entity.provider_id)
+            if provider:
+                ragflow_llm_sync.schedule_unsync_model_from_ragflow(
+                    provider_type=provider.provider_type,
+                    model_name=old_model,
+                    model_type=old_model_type,
+                    user_id=req_ctx.user_id,
+                )
+                ragflow_llm_sync.schedule_sync_model_to_ragflow(
+                    provider_type=provider.provider_type,
+                    base_url=provider.base_url,
+                    api_key=provider.api_key,
+                    model_name=entity.model,
+                    model_type=entity.model_type,
+                    user_id=req_ctx.user_id,
+                    max_tokens=entity.max_input_tokens,
+                )
         return LlmModelResp.from_entity(entity)
 
     def toggle_model_status(
@@ -371,8 +459,48 @@ class LlmService:
         entity = db.get(TbLlmModel, model_id)
         if not entity:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "model not found")
+        provider = db.get(TbLlmProvider, entity.provider_id)
+        model_name = entity.model
+        model_type = entity.model_type
+        provider_type = provider.provider_type if provider else None
         db.delete(entity)
         db.commit()
+
+        if provider_type is not None:
+            ragflow_llm_sync.schedule_unsync_model_from_ragflow(
+                provider_type=provider_type,
+                model_name=model_name,
+                model_type=model_type,
+            )
+
+    def resync_model(
+        self, db: Session, model_id: int, req_ctx: RequestContext
+    ) -> LlmModelResp:
+        """手动触发把当前模型重新推到 RAGFlow,失败抛出。"""
+        entity = db.get(TbLlmModel, model_id)
+        if not entity:
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, "model not found")
+        provider = db.get(TbLlmProvider, entity.provider_id)
+        if not provider:
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, "provider not found")
+        try:
+            ragflow_llm_sync.resync_model_blocking(
+                provider_type=provider.provider_type,
+                base_url=provider.base_url,
+                api_key=provider.api_key,
+                model_name=entity.model,
+                model_type=entity.model_type,
+                user_id=req_ctx.user_id,
+                max_tokens=entity.max_input_tokens,
+            )
+        except ValueError as e:
+            # 不可同步类型 / 映射缺失
+            raise ServiceError(ErrorCode.BAD_REQUEST, str(e)) from e
+        except Exception as e:
+            raise ServiceError(
+                ErrorCode.UPSTREAM_RAGFLOW_ERROR, f"ragflow resync failed: {e}"
+            ) from e
+        return LlmModelResp.from_entity(entity)
 
     # ── Internal ──
 

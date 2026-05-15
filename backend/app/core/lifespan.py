@@ -9,8 +9,10 @@ from fastapi import FastAPI
 from app.app.checkpoint_purger import CheckpointPurger
 from app.app.checkpointer_factory import get_checkpointer_factory
 from app.app.hitl_timeout_worker import HitlTimeoutWorker
+from app.app.kb_status_poller import KbStatusPoller
 from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
+from app.integration import ragflow_client
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +40,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     await hitl_worker.start()
 
+    kb_poller: KbStatusPoller | None = None
+    if settings.ragflow_enabled:
+        kb_poller = KbStatusPoller(
+            interval_seconds=settings.kb_status_poll_interval_seconds,
+        )
+        await kb_poller.start()
+
     try:
         yield
     finally:
+        if kb_poller is not None:
+            await kb_poller.stop()
         await hitl_worker.stop()
         if purger is not None:
             await purger.stop()
+        # 关闭 ragflow httpx 连接池
+        ragflow_client.close_client()
         await factory.close()
         logger.info("checkpointer closed")

@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     flowise_shared_secret: str = Field(default="change-me-easyai-flowise")
     flowise_default_workspace: str = Field(default="")
 
+    # RAGFlow 知识库引擎（fork + trusted-header，详见 docs/knowledge-rag-integration-design.md §3）
+    ragflow_enabled: bool = Field(default=False)
+    ragflow_base_url: str = Field(default="http://127.0.0.1:9380")
+    ragflow_shared_secret: str = Field(default="change-me-easyai-ragflow")
+    ragflow_timeout_sec: float = Field(default=30.0)
+    # 后台 poller: 扫 pending/parsing 文档与 RAGFlow 对账的间隔(秒)
+    kb_status_poll_interval_seconds: int = Field(default=30)
+
 
 settings = Settings()
 

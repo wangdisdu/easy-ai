@@ -6,3 +6,13 @@ class ErrorCode:
     DATA_NOT_FOUND = 1004
     VALIDATION_FAILED = 1005
     DATA_DUPLICATE = 1006
+
+    # 上游 RAGFlow 相关(详见 docs/knowledge-rag-integration-design.md §9)
+    # 拆出独立编码方便日志聚合与前端针对性弹窗;字段级别错误(如 KB 不存在、
+    # 重名)仍复用通用码 + descriptive msg,与 app_service 模式一致。
+    UPSTREAM_RAGFLOW_ERROR = 1200
+    UPSTREAM_AUTH_FAILED = 1201
+    KB_RAGFLOW_DATASET_MISSING = 1202
+    KB_EMBEDDING_MISMATCH = 1203
+    # 创建 KB 时未指定 embedding,且系统设置里也没有默认 embedding
+    KB_EMBEDDING_NOT_CONFIGURED = 1204

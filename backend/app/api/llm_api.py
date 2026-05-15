@@ -167,3 +167,14 @@ def disable_model(
 def delete_model(model_id: str, db: Session = Depends(get_db)) -> Resp[bool]:
     service.delete_model(db=db, model_id=int(model_id))
     return Resp(data=True)
+
+
+@router.post("/model/{model_id}/resync", response_model=Resp[LlmModelResp])
+def resync_model(
+    model_id: str,
+    db: Session = Depends(get_db),
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> Resp[LlmModelResp]:
+    """把当前模型重新推到 RAGFlow,失败返回 UPSTREAM_RAGFLOW_ERROR。
+    仅 Embedding/Rerank 类型可同步,其它类型返回 BAD_REQUEST。"""
+    return Resp(data=service.resync_model(db=db, model_id=int(model_id), req_ctx=req_ctx))

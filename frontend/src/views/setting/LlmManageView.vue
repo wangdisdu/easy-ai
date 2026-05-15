@@ -45,7 +45,13 @@
               <a-col :span="12">
                 <a-form-item label="接口类型">
                   <a-select v-model:value="editForm.provider_type">
-                    <a-select-option value="openai">OpenAI Compatible</a-select-option>
+                    <a-select-option value="openai">OpenAI</a-select-option>
+                    <a-select-option value="openai_compatible"
+                      >OpenAI Compatible</a-select-option
+                    >
+                    <a-select-option value="tongyi"
+                      >Tongyi (DashScope 原生)</a-select-option
+                    >
                     <a-select-option value="ollama">Ollama</a-select-option>
                   </a-select>
                 </a-form-item>
@@ -190,7 +196,13 @@
           <a-col :span="12">
             <a-form-item label="接口类型" name="provider_type">
               <a-select v-model:value="createForm.provider_type">
-                <a-select-option value="openai">OpenAI Compatible</a-select-option>
+                <a-select-option value="openai">OpenAI</a-select-option>
+                <a-select-option value="openai_compatible"
+                  >OpenAI Compatible</a-select-option
+                >
+                <a-select-option value="tongyi"
+                  >Tongyi (DashScope 原生)</a-select-option
+                >
                 <a-select-option value="ollama">Ollama</a-select-option>
               </a-select>
             </a-form-item>
@@ -287,14 +299,22 @@ const statusStyle: Record<string, { dot: string; label: string; color: string }>
   unconfigured: { dot: "llm-dot--unconfigured", label: "未配置", color: "default" },
 };
 const providerTypeLabel: Record<string, string> = {
-  openai: "OpenAI Compatible",
+  openai: "OpenAI",
+  openai_compatible: "OpenAI Compatible",
+  tongyi: "Tongyi (DashScope 原生)",
   ollama: "Ollama",
+  // 旧版本入库的字符串值,仅展示用
   "OpenAI Compatible": "OpenAI Compatible",
   Ollama: "Ollama",
 };
 const providerTypeValueMap: Record<string, string> = {
   openai: "openai",
+  openai_compatible: "openai_compatible",
+  tongyi: "tongyi",
   ollama: "ollama",
+  // 旧版本字符串值规整到当前枚举: 后端 LEGACY_PROVIDER_TYPE_MAP 把
+  // "OpenAI Compatible" 映成 openai (历史包袱, 与现在的 openai_compatible
+  // 区别开), 前端 edit form 加载时保持一致
   "OpenAI Compatible": "openai",
   Ollama: "ollama",
 };
@@ -411,15 +431,23 @@ function toggleExpand(id: string) {
 }
 
 // ── Provider CRUD ──
+// 预置项默认推断接口类型: OpenAI 官方 / 阿里百炼原生 / 其它中文供应商一律走
+// OpenAI Compatible. 用户仍可在表单里手动改.
 function onSelectPredefined(key: string, url: string) {
   createForm.name = key;
-  createForm.provider_type = "openai";
+  if (key === "OpenAI") {
+    createForm.provider_type = "openai";
+  } else if (key.includes("原生")) {
+    createForm.provider_type = "tongyi";
+  } else {
+    createForm.provider_type = "openai_compatible";
+  }
   createForm.base_url = url;
 }
 
 function openCreateProvider() {
   createForm.name = "";
-  createForm.provider_type = "openai";
+  createForm.provider_type = "openai_compatible";
   createForm.base_url = "";
   createForm.api_key = "";
   createOpen.value = true;

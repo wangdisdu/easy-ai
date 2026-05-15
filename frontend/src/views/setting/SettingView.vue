@@ -11,6 +11,9 @@
       <a-tab-pane v-if="canLlm" key="llm" tab="大模型管理">
         <LlmManageView />
       </a-tab-pane>
+      <a-tab-pane v-if="canSetting" key="ai-infra" tab="AI 基础设施">
+        <AiInfraView />
+      </a-tab-pane>
       <a-tab-pane v-if="canSetting" key="category" tab="分类管理">
         <CategoryManageView />
       </a-tab-pane>
@@ -23,24 +26,25 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import LlmManageView from "@/views/setting/LlmManageView.vue";
 import CategoryManageView from "@/views/setting/CategoryManageView.vue";
+import AiInfraView from "@/views/setting/AiInfraView.vue";
 import { useAuthStore } from "@/stores/auth";
 import { PERM } from "@/utils/permission";
 
-type TabKey = "llm" | "category";
+type TabKey = "llm" | "ai-infra" | "category";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const canLlm = computed(() => auth.hasPermission(PERM.SYSTEM_LLM));
 const canSetting = computed(() => auth.hasPermission(PERM.SYSTEM_SETTING));
-const tabKeys: TabKey[] = ["llm", "category"];
+const tabKeys: TabKey[] = ["llm", "ai-infra", "category"];
 
 const activeTab = computed<TabKey>(() => {
   const tab = route.query.tab;
   if (typeof tab === "string" && tabKeys.includes(tab as TabKey)) {
     return tab as TabKey;
   }
-  return canLlm.value ? "llm" : "category";
+  return canLlm.value ? "llm" : "ai-infra";
 });
 
 function onTabChange(tab: string) {

@@ -44,7 +44,7 @@ services:
       FLOWISE_DEFAULT_WORKSPACE: ""
       RAGFLOW_ENABLED: ${RAGFLOW_ENABLED:-true}
       RAGFLOW_BASE_URL: http://ragflow:9380
-      RAGFLOW_API_KEY: ${RAGFLOW_API_KEY:-}
+      RAGFLOW_SHARED_SECRET: ${RAGFLOW_SHARED_SECRET}
       RAGFLOW_TIMEOUT_SEC: ${RAGFLOW_TIMEOUT_SEC:-30}
     volumes:
       - easy-ai-data:/srv/easy-ai-backend/data
@@ -172,7 +172,17 @@ services:
   # - 缓存复用现网 redis (使用 db=1)
   # Embedding 模型由 easy-ai 的 LLM 管理外部 provider 提供, 不部署 TEI
   ragflow:
-    image: ${RAGFLOW_IMAGE:-infiniflow/ragflow:v0.24.0}
+    # 自有 fork: ragflow/ submodule (分支 v0.25.2), 内置 easyai trusted-header
+    # 中间件 + bootstrap, 详见 docs/knowledge-rag-integration-design.md §3.2。
+    # 首次 `./deploy.sh up` 会自动 build, 与 backend / Flowise 同模式。
+    build:
+      context: ../ragflow
+      dockerfile: Dockerfile
+      args:
+        # 国内构建可在 .env 把 RAGFLOW_NEED_MIRROR=1 切到阿里云 pypi 镜像
+        NEED_MIRROR: ${RAGFLOW_NEED_MIRROR:-0}
+        # submodule 形态下 .git 是文件不是目录, git describe 不可用; 由这里兜底
+        RAGFLOW_VERSION: ${RAGFLOW_VERSION:-v0.25.2-easyai}
     container_name: easy-ai-ragflow
     restart: unless-stopped
     ports:
@@ -197,11 +207,17 @@ services:
       MINIO_HOST: minio
       MINIO_USER: ${MINIO_ROOT_USER}
       MINIO_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_PREFIX_PATH: ragflow/
+      MINIO_PREFIX_PATH: ragflow
       # ── Redis(复用 easy-ai-redis,RAGFlow 内部使用 db=1)──
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_AUTH}
+      # ── EasyAI trusted-header 鉴权(fork 注入,详见 §3) ──
+      EASYAI_TRUSTED_HEADER: "true"
+      EASYAI_SHARED_SECRET: ${RAGFLOW_SHARED_SECRET}
+      EASYAI_BOOTSTRAP_EMAIL: ${EASYAI_BOOTSTRAP_EMAIL:-easyai@system.local}
+      EASYAI_BOOTSTRAP_NICKNAME: ${EASYAI_BOOTSTRAP_NICKNAME:-easyai-system}
+      EASYAI_BOOTSTRAP_PASSWORD: ${EASYAI_BOOTSTRAP_PASSWORD:-}
       # ── 其他 ──
       TZ: Asia/Shanghai
       STACK_VERSION: 8.11.3
