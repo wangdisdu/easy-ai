@@ -232,16 +232,25 @@
           <div class="section-head">
             <div>
               <h3 class="section-title">知识库与检索配置</h3>
-              <p class="section-sub">当前阶段先通过知识库 ID 或名称进行绑定。</p>
+              <p class="section-sub">
+                绑定一个或多个知识库；同一应用内 embedding 模型必须一致，否则检索会失败。
+              </p>
             </div>
           </div>
-          <a-form-item label="知识库">
+          <a-form-item label="知识库" required>
             <a-select
               v-model:value="ragConfig.kb_ids"
-              mode="tags"
-              :token-separators="[',']"
-              placeholder="输入知识库 ID 或名称后回车"
+              mode="multiple"
+              :options="kbSelectOptions"
+              :loading="kbOptionsLoading"
+              placeholder="选择要检索的知识库"
+              show-search
+              option-filter-prop="label"
             />
+            <div class="form-hint">
+              没有可选项? 先去
+              <a @click="goToKnowledge">知识库管理</a> 创建并完成解析。
+            </div>
           </a-form-item>
           <a-row :gutter="16">
             <a-col :xs="24" :md="8">
@@ -278,6 +287,25 @@
           </div>
           <a-form-item v-if="ragConfig.enable_summary" label="总结 Prompt">
             <a-textarea v-model:value="ragConfig.summary_prompt" :rows="5" />
+          </a-form-item>
+
+          <a-form-item label="System Prompt">
+            <a-textarea
+              v-model:value="ragConfig.system_prompt"
+              :rows="3"
+              placeholder="可选;在 RAG 上下文前追加,用于定义角色 / 语气 / 输出格式"
+            />
+          </a-form-item>
+          <a-form-item label="RAG Prompt Template">
+            <a-textarea
+              v-model:value="ragConfig.rag_prompt_template"
+              :rows="8"
+              :placeholder="ragTemplatePlaceholder"
+            />
+            <div class="form-hint">
+              支持占位符 <code v-text="'{{context}}'" />(检索到的 chunks)和
+              <code v-text="'{{question}}'" />(用户问题)。留空走系统默认模板。
+            </div>
           </a-form-item>
         </section>
 
@@ -427,6 +455,7 @@ import type { FormInstance, Rule } from "ant-design-vue/es/form";
 import { message } from "ant-design-vue";
 import * as appApi from "@/api/app";
 import * as categoryApi from "@/api/appCategory";
+import * as kbApi from "@/api/kb";
 import * as llmApi from "@/api/llm";
 import * as skillApi from "@/api/skill";
 import * as toolApi from "@/api/tool";
@@ -568,7 +597,33 @@ const ragConfig = reactive({
   summary_model: "",
   summary_temperature: 0.3,
   summary_prompt: "",
+  // M2 新增: RAG 提示词自定义。空字符串时后端走 DEFAULT_RAG_PROMPT_TEMPLATE
+  system_prompt: "",
+  rag_prompt_template: "",
 });
+
+// KB 下拉选项,onMounted 时一次性拉, 缓存供 RAG 应用绑定
+const kbOptions = ref<Array<{ id: string; code: string; name: string; embedding_model: string }>>(
+  [],
+);
+const kbOptionsLoading = ref(false);
+const kbSelectOptions = computed(() =>
+  kbOptions.value.map((kb) => ({
+    value: kb.id,
+    label: `${kb.name} (${kb.code})`,
+  })),
+);
+const ragTemplatePlaceholder = `留空使用系统默认。示例:
+You are a helpful assistant. Answer based ONLY on the context.
+
+Context:
+{{context}}
+
+Question: {{question}}`;
+
+function goToKnowledge() {
+  router.push("/knowledge");
+}
 
 const nl2sqlConfig = reactive({
   db_connection: "",
@@ -737,17 +792,22 @@ function fillFromApp(app: AppResp) {
 }
 
 async function loadDependencies() {
+  kbOptionsLoading.value = true;
   const [
     { data: providerData },
     { data: toolData },
     { data: skillData },
     { data: categoryData },
+    { data: kbOptionData },
   ] = await Promise.all([
     llmApi.pageProvider({ page_no: 1, page_size: 200 }),
     toolApi.pageTool({ page_no: 1, page_size: 1000, tool_status: "enabled" }),
     skillApi.pageSkill({ page_no: 1, page_size: 1000, skill_status: "enabled" }),
     categoryApi.listAppCategory(),
+    kbApi.listKbOptions(),
   ]);
+  kbOptions.value = kbOptionData.data || [];
+  kbOptionsLoading.value = false;
   providerList.value = providerData.data.filter((item) => item.models.length > 0);
   toolOptions.value = toolData.data.map((item) => ({
     label: `${item.tool_name} (${item.source})`,

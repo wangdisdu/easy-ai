@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.doc_ref import encode_doc_ref
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
@@ -90,6 +91,7 @@ class KbRetrieveService:
                 document_ids=ragflow_doc_ids,
                 top_k=req.top_k,
                 similarity_threshold=req.similarity_threshold,
+                vector_similarity_weight=req.vector_similarity_weight,
                 rerank_id=rerank_id,
                 keyword=req.keyword,
             )
@@ -100,9 +102,10 @@ class KbRetrieveService:
         # data 结构: { chunks: [...], doc_aggs: [...], total: int }
         chunks_raw = data.get("chunks") if isinstance(data, dict) else None
         total = int(data.get("total") or 0) if isinstance(data, dict) else 0
+        doc_lookup = self._build_doc_lookup(db, chunks_raw or [])
         hits: list[KbRetrieveHit] = []
         for c in chunks_raw or []:
-            hits.append(_to_hit(c))
+            hits.append(_to_hit(c, doc_lookup))
         logger.info(
             "[kb] action=retrieve kb_ids=%s top_k=%d hits=%d",
             req.kb_ids,
@@ -110,6 +113,21 @@ class KbRetrieveService:
             len(hits),
         )
         return KbRetrieveResp(hits=hits, total=total or len(hits))
+
+    def _build_doc_lookup(
+        self, db: Session, chunks: list[dict]
+    ) -> dict[str, TbKbDocument]:
+        """以 ragflow_doc_id 为 key, 反查 tb_kb_document 实体, 用于 hit 反向
+        填充 easy-ai 侧的 doc_ref/kb_id/easyai_doc_id."""
+        ids = {c.get("document_id") or c.get("doc_id") for c in chunks}
+        ids.discard(None)
+        ids.discard("")
+        if not ids:
+            return {}
+        rows = db.scalars(
+            select(TbKbDocument).where(TbKbDocument.ragflow_doc_id.in_(ids))
+        ).all()
+        return {r.ragflow_doc_id: r for r in rows if r.ragflow_doc_id}
 
     def _resolve_rerank_id(self, db: Session, requested: str | None) -> str | None:
         """req.rerank_id 优先;否则系统默认。任何一步缺失都返回 None
@@ -153,18 +171,28 @@ class KbRetrieveService:
         return build_ragflow_model_ref(llm_model.model, provider.provider_type)
 
 
-def _to_hit(chunk: dict) -> KbRetrieveHit:
+def _to_hit(chunk: dict, doc_lookup: dict[str, TbKbDocument]) -> KbRetrieveHit:
     """RAGFlow chunk dict → 引用溯源 KbRetrieveHit。字段宽松适配,
-    不同 RAGFlow 版本字段名略有差异。"""
+    不同 RAGFlow 版本字段名略有差异。``doc_lookup`` 用于把 ragflow_doc_id
+    映射到 easy-ai tb_kb_document, 反填 doc_ref/kb_id/easyai_doc_id。"""
     similarity = chunk.get("similarity")
     if similarity is None:
         # 兼容 vector_similarity / term_similarity 两个分项
         similarity = chunk.get("vector_similarity") or chunk.get("term_similarity")
+    ragflow_did = chunk.get("document_id") or chunk.get("doc_id")
+    doc_entity = doc_lookup.get(ragflow_did) if ragflow_did else None
     return KbRetrieveHit(
         chunk_id=str(chunk.get("id") or chunk.get("chunk_id") or ""),
         content=str(chunk.get("content") or chunk.get("content_with_weight") or ""),
         similarity=float(similarity) if similarity is not None else None,
-        doc_id=chunk.get("document_id") or chunk.get("doc_id"),
-        doc_name=chunk.get("document_keyword") or chunk.get("docnm_kwd"),
+        doc_id=ragflow_did,
+        doc_name=(
+            chunk.get("document_keyword")
+            or chunk.get("docnm_kwd")
+            or (doc_entity.name if doc_entity else None)
+        ),
+        easyai_doc_id=str(doc_entity.id) if doc_entity else None,
+        doc_ref=encode_doc_ref(doc_entity.id) if doc_entity else None,
+        kb_id=str(doc_entity.kb_id) if doc_entity else None,
         highlight=chunk.get("highlight"),
     )

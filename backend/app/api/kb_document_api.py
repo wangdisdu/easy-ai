@@ -34,6 +34,16 @@ class KbDocumentIdsReq(BaseModel):
     ids: list[str] = Field(min_length=1)
 
 
+@router.get("/document-by-ref/{ref}", response_model=Resp[KbDocumentResp])
+def get_document_by_ref(
+    ref: str,
+    db: Session = Depends(get_db),
+) -> Resp[KbDocumentResp]:
+    """Base36 引用码反查文档,无需 kb_id。前端从 RAG 答案里 [[doc:REF]]
+    点击跳预览时用。"""
+    return Resp(data=service.get_document_by_ref(db, ref))
+
+
 @router.get("/{kb_id}/document/page", response_model=PagedResp[KbDocumentResp])
 def page_documents(
     kb_id: str,

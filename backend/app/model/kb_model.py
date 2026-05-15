@@ -190,6 +190,9 @@ class KbRetrieveReq(BaseModel):
     question: str = Field(min_length=1)
     top_k: int = Field(default=8, ge=1, le=64)
     similarity_threshold: float = Field(default=0.2, ge=0.0, le=1.0)
+    # 向量相似度与关键词混合检索的权重, 0=纯关键词, 1=纯向量;默认 0.3
+    # 偏关键词,对中文短查询更稳。对应 RAGFlow retrieve.vector_similarity_weight
+    vector_similarity_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     document_ids: list[str] | None = Field(default=None)
     rerank_id: str | None = Field(default=None)
     keyword: bool = Field(default=False)
@@ -201,9 +204,14 @@ class KbRetrieveHit(BaseModel):
     chunk_id: str
     content: str
     similarity: float | None = None
+    # ragflow 内部 doc id, 保留向后兼容
     doc_id: str | None = None
     doc_name: str | None = None
     highlight: str | None = None
+    # easy-ai 侧字段, RAG 应用引用溯源用; 未找到映射时为 None
+    easyai_doc_id: str | None = None
+    doc_ref: str | None = None
+    kb_id: str | None = None
 
 
 class KbRetrieveResp(BaseModel):

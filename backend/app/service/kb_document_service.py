@@ -385,6 +385,22 @@ class KbDocumentService:
                     db.refresh(entity)
         return KbDocumentResp.from_entity(entity)
 
+    def get_document_by_ref(self, db: Session, ref: str) -> KbDocumentResp:
+        """Base36 引用码 → KbDocumentResp。无需 kb_id;若 ref 无效或文档
+        不存在抛 DATA_NOT_FOUND。"""
+        from app.core.doc_ref import decode_doc_ref
+
+        try:
+            doc_id = decode_doc_ref(ref)
+        except ValueError as e:
+            raise ServiceError(ErrorCode.BAD_REQUEST, f"invalid doc ref: {ref}") from e
+        entity = db.get(TbKbDocument, doc_id)
+        if not entity:
+            raise ServiceError(
+                ErrorCode.DATA_NOT_FOUND, f"document not found for ref={ref}"
+            )
+        return KbDocumentResp.from_entity(entity)
+
     def download_document(
         self, db: Session, kb_id: int, doc_id: int, req_ctx: RequestContext
     ) -> tuple[bytes, str, str]:

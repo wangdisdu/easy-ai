@@ -91,10 +91,10 @@
       </div>
 
       <!-- 消息列表 -->
-      <div ref="chatContainer" class="chat-messages">
+      <div ref="chatContainer" class="chat-messages" @click="onMessagesClick">
         <!-- 空状态 -->
         <div v-if="!messages.length && !isStreaming" class="chat-empty">
-          <div class="chat-empty-icon">{{ selectedApp?.app_type === 'agent' ? '🤖' : '✨' }}</div>
+          <div class="chat-empty-icon">{{ selectedApp?.app_type === 'agent' ? '🤖' : selectedApp?.app_type === 'rag' ? '📚' : '✨' }}</div>
           <h3 class="chat-empty-title">开始与 {{ selectedApp?.name || "AI" }} 对话</h3>
           <p class="chat-empty-desc">{{ selectedApp?.description || "输入你的问题开始交互" }}</p>
         </div>
@@ -134,7 +134,7 @@
 
                 <!-- AI 文本内容 -->
                 <template v-for="(ai, aIdx) in turn.assistants" :key="'a-' + aIdx">
-                  <div v-if="ai.content" class="msg-content" v-html="renderMarkdown(ai.content)"></div>
+                  <div v-if="ai.content" class="msg-content" v-html="renderMarkdownWithDocRefs(ai.content, getMsgRefNames(ai))"></div>
                 </template>
               </div>
 
@@ -188,7 +188,7 @@
               </div>
 
               <!-- 流式文本 -->
-              <div v-if="streamingContent" class="msg-content" v-html="renderMarkdown(streamingContent + '▍')"></div>
+              <div v-if="streamingContent" class="msg-content" v-html="renderMarkdownWithDocRefs(streamingContent + '▍', streamingRefNames)"></div>
               <!-- 处理中指示器：只要仍在流式且没有文本内容，就显示思考动画 -->
               <div v-if="isStreaming && !streamingContent && !pendingHitl" class="chat-thinking">
                 <span class="dot" /><span class="dot" /><span class="dot" />
@@ -250,9 +250,11 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
-import { renderMarkdown, runMermaid } from "@/composables/useMarkdown";
+import { renderMarkdownWithDocRefs, runMermaid } from "@/composables/useMarkdown";
 import * as convApi from "@/api/conversation";
 import * as appApi from "@/api/app";
+import * as kbApi from "@/api/kb";
+import { useRouter } from "vue-router";
 import type { AppResp, ConversationResp, ConversationMessageResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
 import TodoPanel, { type Todo } from "@/components/TodoPanel.vue";
@@ -320,9 +322,16 @@ function resolvedActionLabel(action: ResolvedHitlAction): string {
       return "超时已自动拒绝";
   }
 }
-const streamMeta = reactive<{ model: string; sources: string[]; usage: Record<string, unknown> | null; latency_ms: number | null }>({
+const streamMeta = reactive<{
+  model: string;
+  sources: string[];
+  references: Array<{ doc_ref?: string | null; doc_name?: string | null }>;
+  usage: Record<string, unknown> | null;
+  latency_ms: number | null;
+}>({
   model: "",
   sources: [],
+  references: [],
   usage: null,
   latency_ms: null,
 });
@@ -437,12 +446,65 @@ function getMsgSources(msg: ConversationMessageResp): string[] {
   return Array.isArray(sources) ? (sources as string[]) : [];
 }
 
+// 把 "docname (a1d43kxvc3k)" 形态的 sources 字符串解析成 ref → name 映射,
+// 用于 markdown 内 [[doc:xxx]] 链接渲染时连带文档名显示
+function parseRefNames(sources: string[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const s of sources) {
+    const m = /^(.+?)\s*\(([a-z0-9]{4,16})\)\s*$/i.exec(s);
+    if (m) map[m[2].toLowerCase()] = m[1].trim();
+  }
+  return map;
+}
+
+function getMsgRefNames(msg: ConversationMessageResp): Record<string, string> {
+  return parseRefNames(getMsgSources(msg));
+}
+
+// 流式中的 ref→name 来源:references 事件的富结构(优先)+ message_complete 的字符串数组(兜底)
+const streamingRefNames = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {};
+  for (const r of streamMeta.references) {
+    if (r.doc_ref && r.doc_name && !map[r.doc_ref]) {
+      map[r.doc_ref] = r.doc_name;
+    }
+  }
+  // sources 兜底(message_complete 后才有)
+  Object.assign(map, parseRefNames(streamMeta.sources));
+  return map;
+});
+
 function getTurnSources(turn: MessageTurn): string[] {
   const all: string[] = [];
   for (const msg of turn.assistants) {
     all.push(...getMsgSources(msg));
   }
   return [...new Set(all)];
+}
+
+const router = useRouter();
+
+// 事件委托:点 [[doc:xxx]] 渲染出的 .doc-ref-link → 后端反查 ref 拿
+// kb_id+doc_id → 新页签打开预览
+async function onMessagesClick(ev: MouseEvent) {
+  const target = (ev.target as HTMLElement | null)?.closest?.(".doc-ref-link") as
+    | HTMLAnchorElement
+    | null;
+  if (!target) return;
+  ev.preventDefault();
+  const ref = target.dataset.docRef;
+  if (!ref) return;
+  try {
+    const { data } = await kbApi.getKbDocumentByRef(ref);
+    const doc = data.data;
+    const url = router.resolve({
+      name: "knowledge-doc-preview",
+      params: { kbId: doc.kb_id, docId: doc.id },
+    }).href;
+    window.open(url, "_blank");
+  } catch (e) {
+    message.error("找不到引用文档: " + ((e as Error).message || ref));
+  }
 }
 
 function scrollToBottom() {
@@ -569,6 +631,7 @@ function sendMessage() {
   hitlTimeoutFlag = false;
   streamMeta.model = "";
   streamMeta.sources = [];
+  streamMeta.references = [];
   streamMeta.usage = null;
   streamMeta.latency_ms = null;
 
@@ -623,6 +686,12 @@ function buildStreamHandlers() {
         case "tool_hitl_required":
           pendingHitl.value = evt.data as unknown as HitlPayload;
           scrollToBottom();
+          break;
+        case "references":
+          // RAG 应用流式专属:富结构引用列表(含 doc_name),用于把
+          // [[doc:xxx]] 渲染时连带文档名显示
+          streamMeta.references =
+            (evt.data.items as Array<{ doc_ref?: string | null; doc_name?: string | null }>) ?? [];
           break;
         case "message_complete":
           streamMeta.usage = (evt.data.usage as Record<string, unknown>) ?? null;
@@ -1246,6 +1315,34 @@ onMounted(async () => {
   border: 1px solid var(--color-info-bg);
   font-size: 10px;
   color: var(--color-info-strong);
+}
+
+/* 行内 [[doc:xxx]] 引用链接(由 marked doc-ref 扩展渲染) */
+.chat-bubble--ai :deep(.doc-ref-link) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  margin: 0 2px;
+  border-radius: 4px;
+  background: var(--color-info-bg);
+  color: var(--color-info-strong);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+.chat-bubble--ai :deep(.doc-ref-link:hover) {
+  border-color: var(--color-primary, #1677ff);
+  background: var(--color-info-bg);
+  text-decoration: none;
+}
+.chat-bubble--ai :deep(.doc-ref-icon) {
+  flex-shrink: 0;
+  opacity: 0.7;
 }
 
 /* 正在思考动画 */

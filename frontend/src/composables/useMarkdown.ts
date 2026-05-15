@@ -24,6 +24,42 @@ marked.use({
   },
 });
 
+// ── 注册 [[doc:REF]] 内联引用扩展(用于 RAG 应用回答的文档引用)──────────────
+// 渲染成 data-doc-ref 标记的 anchor,具体跳转逻辑由 AssistantView 等使用方
+// 通过事件委托捕获 click 处理(调 GET /kb/document-by-ref/{ref} 解析后跳预览)。
+// inline level extension 不会在 fenced code block 内被处理。
+marked.use({
+  extensions: [
+    {
+      name: "doc-ref",
+      level: "inline",
+      start(src: string) {
+        const i = src.indexOf("[[doc:");
+        return i === -1 ? undefined : i;
+      },
+      tokenizer(src: string) {
+        const m = /^\[\[doc:([a-z0-9]{4,16})\]\]/i.exec(src);
+        if (!m) return undefined;
+        return {
+          type: "doc-ref",
+          raw: m[0],
+          ref: m[1].toLowerCase(),
+        };
+      },
+      renderer(token) {
+        const ref = (token as unknown as { ref: string }).ref;
+        return (
+          `<a class="doc-ref-link" data-doc-ref="${ref}" href="#" ` +
+          `role="button" title="点击查看引用文档">` +
+          `<svg class="doc-ref-icon" width="11" height="11" viewBox="0 0 24 24" ` +
+          `fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>` +
+          `${ref}</a>`
+        );
+      },
+    },
+  ],
+});
+
 // ── 初始化 mermaid（全局，只需一次）────────────────────────────────────────
 mermaid.initialize({
   startOnLoad: false,
@@ -34,6 +70,38 @@ mermaid.initialize({
 
 export function renderMarkdown(text: string): string {
   return marked(text) as string;
+}
+
+/**
+ * 渲染 markdown 后,把 .doc-ref-link 内的纯 ref 文本替换为 "文档名 (ref)"。
+ * 适用场景:RAG 回答里的 [[doc:abc123]] 已经被 marked 扩展渲染成 anchor,
+ * 但只显示 ref 不友好;调用方传入预先建好的 ``refNames`` (ref → 文档名)
+ * 作为参考,匹配到的会被替换,匹配不到的保持只显 ref。
+ */
+export function renderMarkdownWithDocRefs(
+  text: string,
+  refNames: Record<string, string>,
+): string {
+  const html = renderMarkdown(text);
+  if (!refNames || Object.keys(refNames).length === 0) return html;
+  return html.replace(
+    /(<a[^>]*class="doc-ref-link"[^>]*data-doc-ref="([a-z0-9]+)"[^>]*>)(<svg[^>]*>[\s\S]*?<\/svg>)([^<]*)(<\/a>)/gi,
+    (_full, openTag: string, ref: string, svg: string, _refText: string, closeTag: string) => {
+      const name = refNames[ref];
+      if (!name) return `${openTag}${svg}${escapeHtml(ref)}${closeTag}`;
+      return `${openTag}${svg}${escapeHtml(`${name} (${ref})`)}${closeTag}`;
+    },
+  );
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;"
+    : c === "<" ? "&lt;"
+    : c === ">" ? "&gt;"
+    : c === "\"" ? "&quot;"
+    : "&#39;",
+  );
 }
 
 /**

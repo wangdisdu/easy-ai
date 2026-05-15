@@ -46,6 +46,12 @@ export function pageKb(params: {
   return request.get<ApiPageResp<KbResp>>("/api/v1/kb/page", { params });
 }
 
+export function getKbDocumentByRef(ref: string) {
+  return request.get<ApiResp<KbDocumentResp>>(
+    `/api/v1/kb/document-by-ref/${encodeURIComponent(ref)}`,
+  );
+}
+
 export function listKbOptions() {
   return request.get<ApiResp<KbOption[]>>("/api/v1/kb/options");
 }

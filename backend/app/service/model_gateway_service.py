@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 import time
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import httpx
@@ -19,6 +22,8 @@ from app.model.open_model import (
     ModelGatewayResponse,
 )
 from app.service.app_log_service import AppLogService
+
+logger = logging.getLogger(__name__)
 
 
 class ModelGatewayService:
@@ -155,6 +160,127 @@ class ModelGatewayService:
             model=req.runtime_config.model,
             request_type=request_type,
         )
+
+    async def chat_completion_stream(
+        self,
+        db: Session,
+        req: LiteLLMChatRequest,
+        req_ctx: RequestContext,
+        *,
+        app_id: int | None = None,
+        app_type: str | None = None,
+        request_type: str = "chat_completion",
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """OpenAI 风格 SSE 流式 chat.completion。逐 token 产出:
+
+        - ``{"delta": "..."}`` 每个 content delta
+        - ``{"usage": {...}}`` 末尾 usage(若上游返回)
+        - ``{"done": True, "latency_ms": int}`` 流终止
+
+        失败时:``{"error": "..."}`` + ``{"done": True, ...}``。日志在 finally
+        统一落,聚合全文 + usage。
+        """
+        payload: dict[str, Any] = {
+            "model": req.runtime_config.model,
+            "messages": [m.model_dump() for m in req.messages],
+            "stream": True,
+            # OpenAI 风格:要 usage 必须 include stream_options
+            "stream_options": {"include_usage": True},
+        }
+        payload.update(req.runtime_config.model_setting)
+        payload.update(req.extra_body)
+
+        base_url = (req.runtime_config.base_url or self.default_base_url()).rstrip("/")
+        headers = self._build_headers(req.runtime_config.api_key)
+
+        started_at = time.perf_counter()
+        full_content = ""
+        usage: dict[str, Any] | None = None
+        success = True
+        error_message: str | None = None
+        response_status: int | None = None
+
+        try:
+            async with (
+                httpx.AsyncClient(timeout=self._timeout) as client,
+                client.stream(
+                    "POST", f"{base_url}/chat/completions", json=payload, headers=headers
+                ) as resp,
+            ):
+                    response_status = resp.status_code
+                    if resp.status_code >= 400:
+                        body = await resp.aread()
+                        error_message = (
+                            f"litellm stream failed status={resp.status_code} "
+                            f"body={self._truncate(body.decode('utf-8', 'replace'))}"
+                        )
+                        yield {"error": error_message}
+                        success = False
+                        return
+
+                    async for raw_line in resp.aiter_lines():
+                        if not raw_line:
+                            continue
+                        line = raw_line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if not data or data == "[DONE]":
+                            continue
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = chunk.get("choices")
+                        if isinstance(choices, list) and choices:
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content")
+                            if isinstance(content, str) and content:
+                                full_content += content
+                                yield {"delta": content}
+                        # OpenAI / LiteLLM 在最后一个 chunk 给 usage
+                        u = chunk.get("usage")
+                        if isinstance(u, dict):
+                            usage = u
+        except httpx.HTTPError as e:
+            success = False
+            error_message = f"litellm stream transport error: {e}"
+            yield {"error": error_message}
+        except Exception as e:
+            success = False
+            error_message = f"litellm stream unexpected error: {e}"
+            logger.exception("[gateway] stream failed")
+            yield {"error": error_message}
+        finally:
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            if usage:
+                yield {"usage": usage}
+            yield {"done": True, "latency_ms": latency_ms}
+            # 写日志(独立路径,不影响产出)
+            try:
+                self._log_service.create_log(
+                    db,
+                    app_id=app_id,
+                    app_type=app_type,
+                    provider_id=req.runtime_config.provider_id,
+                    model_id=req.runtime_config.model_id,
+                    model=req.runtime_config.model,
+                    request_type=request_type,
+                    request_payload=payload,
+                    response_payload={"content": full_content, "usage": usage},
+                    success=success,
+                    response_status=response_status,
+                    latency_ms=latency_ms,
+                    error_message=error_message,
+                    langfuse_trace_id=None,
+                    total_tokens=(usage or {}).get("total_tokens"),
+                    input_tokens=(usage or {}).get("prompt_tokens"),
+                    output_tokens=(usage or {}).get("completion_tokens"),
+                    now=req_ctx.request_time_ms,
+                    user_id=req_ctx.user_id,
+                )
+            except Exception:
+                logger.exception("[gateway] stream log write failed")
 
     def embedding(
         self,

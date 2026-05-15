@@ -13,6 +13,7 @@ from app.app.agent_app import AgentApp
 from app.app.app_runtime import AppRuntime
 from app.app.checkpointer_factory import get_checkpointer_factory
 from app.app.llm_app import LlmApp
+from app.app.rag_app import RagApp
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
@@ -38,6 +39,7 @@ class ConversationService:
         self._app_runtime = AppRuntime()
         self._llm_app = LlmApp(app_runtime=self._app_runtime)
         self._agent_app = AgentApp(app_runtime=self._app_runtime)
+        self._rag_app = RagApp(app_runtime=self._app_runtime)
 
     # ── CRUD ──
 
@@ -296,7 +298,7 @@ class ConversationService:
 
         conv = self._get_own_conversation(db, conversation_id, req_ctx.user_id)
         app = self._app_runtime.get_app(db, conv.app_id)
-        if app.app_type not in ("llm", "agent"):
+        if app.app_type not in ("llm", "agent", "rag"):
             raise ServiceError(
                 ErrorCode.BAD_REQUEST,
                 f"streaming not supported for app type: {app.app_type}",
@@ -409,6 +411,18 @@ class ConversationService:
             inner_gen = self._llm_app.stream(
                 db=SessionLocal(),
                 req=llm_req,
+                req_ctx=req_ctx,
+                request_type="chat",
+            )
+        elif app_type == "rag":
+            # RagApp 当前为非真流桥接(asyncio.to_thread 包同步 run),
+            # 真 token-level streaming 留给 M2.2
+            from app.model.open_model import RagRunRequest
+
+            rag_req = RagRunRequest(app_id=app_id, messages=messages)
+            inner_gen = self._rag_app.stream(
+                db=SessionLocal(),
+                req=rag_req,
                 req_ctx=req_ctx,
                 request_type="chat",
             )

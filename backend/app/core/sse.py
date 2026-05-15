@@ -21,6 +21,8 @@ SSE_EVENT_TOOL_HITL_REQUIRED = "tool_hitl_required"
 SSE_EVENT_MESSAGE_COMPLETE = "message_complete"
 SSE_EVENT_ERROR = "error"
 SSE_EVENT_DONE = "done"
+# RAG 专属:在 token 流前发送参考文档列表;前端用来渲染 sources pill
+SSE_EVENT_REFERENCES = "references"
 
 
 def format_sse_event(event: str, data: dict[str, Any]) -> str:

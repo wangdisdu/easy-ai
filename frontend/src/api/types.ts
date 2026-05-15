@@ -106,6 +106,21 @@ export interface AppRunResp {
   model: string;
   latency_ms?: number | null;
   result: Record<string, unknown>;
+  // RAG 应用专属:命中 chunk 列表,前端用来渲染参考文档卡片
+  references?: AppRunReference[];
+  retrieved_count?: number;
+  retrieve_latency_ms?: number;
+  llm_latency_ms?: number;
+}
+
+export interface AppRunReference {
+  doc_ref?: string | null;
+  doc_id?: string | null;
+  doc_name?: string | null;
+  kb_id?: string | null;
+  chunk_id?: string | null;
+  similarity?: number | null;
+  snippet?: string | null;
 }
 
 export interface AppLogResp {

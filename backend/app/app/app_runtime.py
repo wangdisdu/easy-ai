@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.error_code import ErrorCode
@@ -41,6 +42,38 @@ class AppRuntime:
             provider_id=provider_id,
             model_id=model_id,
             model_setting=model_setting,
+        )
+
+    def build_chat_runtime_by_model_name(
+        self,
+        db: Session,
+        *,
+        model_name: str,
+        model_setting: dict | None = None,
+        model_type: str = "LLM",
+    ) -> LiteLLMRuntimeConfig:
+        """按模型 name 解析(RAG summary / 子任务模型场景)。重名时按 id 升序取
+        首个 active 模型 + active provider。"""
+        rows = db.scalars(
+            select(TbLlmModel)
+            .where(TbLlmModel.model == model_name, TbLlmModel.model_type == model_type)
+            .order_by(TbLlmModel.id.asc())
+        ).all()
+        for m in rows:
+            if m.status != "active":
+                continue
+            provider = db.get(TbLlmProvider, m.provider_id) if m.provider_id else None
+            if not provider or provider.status not in {"active", "connected"}:
+                continue
+            return self._build_runtime_by_model(
+                db=db,
+                provider_id=str(provider.id),
+                model_id=str(m.id),
+                model_setting=model_setting,
+            )
+        raise ServiceError(
+            ErrorCode.DATA_NOT_FOUND,
+            f"model {model_name!r} ({model_type}) not found or no active provider",
         )
 
     def _build_runtime(self, db: Session, app_id: int) -> LiteLLMRuntimeConfig:

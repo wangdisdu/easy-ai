@@ -150,6 +150,17 @@ def _dispatch_stream(
         )
         return agent_app.stream(db=db, req=agent_req, req_ctx=req_ctx, request_type=request_type)
 
+    if app.app_type == "rag":
+        rag_req = RagRunRequest(
+            app_id=app_id,
+            query=_resolve_query(req),
+            messages=req.messages or [],
+            variables=req.variables,
+        )
+        # RagApp.stream 内部用独立 SessionLocal,这里入参 db 可放心关闭
+        db.close()
+        return rag_app.stream(db=None, req=rag_req, req_ctx=req_ctx, request_type=request_type)  # type: ignore[arg-type]
+
     db.close()
     raise ServiceError(
         ErrorCode.BAD_REQUEST, f"streaming not supported for app type: {app.app_type}"
@@ -177,14 +188,20 @@ async def _dispatch(
         return await agent_app.run(db=db, req=agent_req, req_ctx=req_ctx, request_type=request_type)
 
     if app.app_type == "rag":
-        query = _resolve_query(req)
-        rag_req = RagRunRequest(app_id=app_id, query=query, variables=req.variables)
+        # 多轮:把 messages 直接交给 RagApp,内部抽 last user 为 query;
+        # 单轮兼容:_resolve_query 退回单条 query 字段。
+        rag_req = RagRunRequest(
+            app_id=app_id,
+            query=_resolve_query(req),
+            messages=req.messages or [],
+            variables=req.variables,
+        )
         return rag_app.run(
             db=db,
             req=rag_req,
             req_ctx=req_ctx,
             request_type=request_type,
-        ).model_dump()
+        )
 
     raise ServiceError(ErrorCode.BAD_REQUEST, f"app type not supported yet: {app.app_type}")
 

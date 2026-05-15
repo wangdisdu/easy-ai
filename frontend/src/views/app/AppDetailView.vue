@@ -97,7 +97,7 @@
         >
           打开画布
         </a-button>
-        <a-button v-if="['llm', 'agent'].includes(app.app_type)" @click="openTestDrawer">测试</a-button>
+        <a-button v-if="['llm', 'agent', 'rag'].includes(app.app_type)" @click="openTestDrawer">测试</a-button>
         <a-button v-if="canPublish && app.app_status === 'published'" @click="onOffline">下线</a-button>
         <a-button v-if="canPublish && app.app_status === 'offline'" type="primary" @click="openPublish">上线</a-button>
         <a-button v-if="canPublish && app.app_status === 'draft'" type="primary" @click="openPublish">发布应用</a-button>
@@ -354,8 +354,8 @@
       destroy-on-close
       :body-style="{ padding: 0, display: 'flex', flexDirection: 'column', height: '100%' }"
     >
-      <template v-if="['llm', 'agent'].includes(app?.app_type ?? '')">
-        <div class="test-chat-body">
+      <template v-if="['llm', 'agent', 'rag'].includes(app?.app_type ?? '')">
+        <div class="test-chat-body" @click="onTestPanelClick">
           <!-- 输入 + 操作合并区 -->
           <div class="test-composer">
             <!-- LLM 输入表单 -->
@@ -402,6 +402,18 @@
               />
             </template>
 
+            <!-- RAG 输入 -->
+            <template v-if="app?.app_type === 'rag'">
+              <a-textarea
+                v-model:value="ragTestQuery"
+                :auto-size="{ minRows: 2, maxRows: 6 }"
+                placeholder="输入问题，回车提交"
+                :disabled="isStreaming"
+                class="test-composer-textarea"
+                @pressEnter="(e: KeyboardEvent) => { if (!e.shiftKey) { e.preventDefault(); onTestRag(); } }"
+              />
+            </template>
+
             <!-- 底部操作条 -->
             <div class="test-composer-bar">
               <span v-if="streamMeta.model" class="test-meta-tag">{{ streamMeta.model }}</span>
@@ -412,7 +424,7 @@
                 size="small"
                 :loading="isStreaming"
                 :disabled="isStreaming"
-                @click="app?.app_type === 'llm' ? onTestLlm() : onTestAgent()"
+                @click="dispatchTestRun"
               >
                 运行
               </a-button>
@@ -507,6 +519,30 @@
                     <a-spin size="small" /> 正在思考...
                   </div>
                 </div>
+
+                <!-- RAG references 卡片列表 -->
+                <div v-if="ragReferences.length" class="rag-refs">
+                  <div class="rag-refs-head">参考文档({{ ragReferences.length }})</div>
+                  <div class="rag-refs-list">
+                    <div
+                      v-for="(ref, i) in ragReferences"
+                      :key="ref.chunk_id || i"
+                      class="rag-ref-card"
+                      @click="openRefPreview(ref)"
+                    >
+                      <div class="rag-ref-head">
+                        <span class="rag-ref-name">{{ ref.doc_name || "(未命名)" }}</span>
+                        <span v-if="ref.similarity != null" class="rag-ref-sim">
+                          相似度 {{ (ref.similarity * 100).toFixed(1) }}%
+                        </span>
+                      </div>
+                      <div class="rag-ref-snippet">{{ ref.snippet }}</div>
+                      <div v-if="ref.doc_ref" class="rag-ref-foot">
+                        <span class="rag-ref-code">[[doc:{{ ref.doc_ref }}]]</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -528,8 +564,18 @@
 
           <!-- 空状态 -->
           <div v-else class="test-empty">
-            <div class="test-empty-icon">{{ app?.app_type === 'agent' ? '🤖' : '✨' }}</div>
-            <div class="test-empty-text">{{ app?.app_type === 'agent' ? '输入消息开始与 Agent 对话' : '填写输入变量后点击运行' }}</div>
+            <div class="test-empty-icon">
+              {{ app?.app_type === 'agent' ? '🤖' : app?.app_type === 'rag' ? '📚' : '✨' }}
+            </div>
+            <div class="test-empty-text">
+              {{
+                app?.app_type === 'agent'
+                  ? '输入消息开始与 Agent 对话'
+                  : app?.app_type === 'rag'
+                    ? '输入问题,从绑定的知识库检索 + 生成答案'
+                    : '填写输入变量后点击运行'
+              }}
+            </div>
           </div>
         </div>
       </template>
@@ -635,11 +681,12 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeftOutlined, RightOutlined } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
-import { marked } from "marked";
+import { renderMarkdownWithDocRefs } from "@/composables/useMarkdown";
 import * as appApi from "@/api/app";
+import * as kbApi from "@/api/kb";
 import * as llmApi from "@/api/llm";
 import type { HitlAction } from "@/api/conversation";
-import type { AppLogResp, AppResp, AppVersionResp } from "@/api/types";
+import type { AppLogResp, AppResp, AppRunReference, AppVersionResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
 import { useAuthStore } from "@/stores/auth";
 import { PERM } from "@/utils/permission";
@@ -660,6 +707,8 @@ const publishing = ref(false);
 const testOpen = ref(false);
 const agentTestMessage = ref("");
 const llmTestInputs = reactive<Record<string, string | number | undefined>>({});
+const ragTestQuery = ref("");
+const ragReferences = ref<AppRunReference[]>([]);
 const logDetailOpen = ref(false);
 const currentLog = ref<AppLogResp | null>(null);
 const logViewMode = ref<"formatted" | "raw">("formatted");
@@ -741,8 +790,42 @@ const parsedMessages = computed<ParsedMessage[]>(() => {
   });
 });
 
+// ragReferences 由 SSE references 事件填充, 这里反推成 ref → 文档名
+// 映射,供 [[doc:xxx]] 内联链接渲染时显示文档名
+const ragRefNames = computed<Record<string, string>>(() => {
+  const map: Record<string, string> = {};
+  for (const r of ragReferences.value) {
+    if (r.doc_ref && r.doc_name && !map[r.doc_ref]) {
+      map[r.doc_ref] = r.doc_name;
+    }
+  }
+  return map;
+});
+
 function renderMarkdown(text: string): string {
-  return marked(text) as string;
+  return renderMarkdownWithDocRefs(text, ragRefNames.value);
+}
+
+// 事件委托:点 .doc-ref-link 时反查 ref → 新页签跳预览
+async function onTestPanelClick(ev: MouseEvent) {
+  const target = (ev.target as HTMLElement | null)?.closest?.(".doc-ref-link") as
+    | HTMLAnchorElement
+    | null;
+  if (!target) return;
+  ev.preventDefault();
+  const ref = target.dataset.docRef;
+  if (!ref) return;
+  try {
+    const { data } = await kbApi.getKbDocumentByRef(ref);
+    const doc = data.data;
+    const url = router.resolve({
+      name: "knowledge-doc-preview",
+      params: { kbId: doc.kb_id, docId: doc.id },
+    }).href;
+    window.open(url, "_blank");
+  } catch (e) {
+    message.error("找不到引用文档: " + ((e as Error).message || ref));
+  }
 }
 
 const appTypeLabel: Record<string, string> = {
@@ -1034,6 +1117,7 @@ function resetStreamState() {
   hitlBusy.value = false;
   currentThreadId.value = null;
   hitlTimeoutFlag = false;
+  ragReferences.value = [];
 }
 
 function handleStreamEvent(evt: SSEEvent) {
@@ -1068,6 +1152,11 @@ function handleStreamEvent(evt: SSEEvent) {
       break;
     case "message_complete":
       streamMeta.tokenUsage = (evt.data.usage as TokenUsage) ?? null;
+      break;
+    case "references":
+      // RAG 应用流式专属:富结构的参考文档列表;message_complete.sources 是
+      // 兼容用的简短字符串数组,这里覆盖成完整 card 数据
+      ragReferences.value = (evt.data.items as AppRunReference[]) ?? [];
       break;
     case "done":
       streamMeta.latency_ms = (evt.data.latency_ms as number) ?? null;
@@ -1147,6 +1236,53 @@ function onTestLlm() {
       isStreaming.value = false;
     },
   });
+}
+
+function dispatchTestRun() {
+  if (!app.value) return;
+  if (app.value.app_type === "llm") return onTestLlm();
+  if (app.value.app_type === "agent") return onTestAgent();
+  if (app.value.app_type === "rag") return onTestRag();
+}
+
+// M2.2 后改走 SSE 流, 体验与 LLM/Agent 测试一致;references 通过新
+// SSE 事件 'references' 推。后端 RagApp.stream 已支持。
+function onTestRag() {
+  if (!app.value || app.value.app_type !== "rag") return;
+  const q = ragTestQuery.value.trim();
+  if (!q) {
+    message.warning("请输入测试问题");
+    return;
+  }
+  resetStreamState();
+  isStreaming.value = true;
+  userMessageText.value = q;
+  streamAbort.value = appApi.testAppStream(
+    app.value.id,
+    { messages: [{ role: "user", content: q }] },
+    {
+      onEvent: handleStreamEvent,
+      onDone() {
+        isStreaming.value = false;
+      },
+      onError(err) {
+        message.error(err.message || "测试请求失败");
+        isStreaming.value = false;
+      },
+    },
+  );
+}
+
+function openRefPreview(ref: AppRunReference) {
+  if (!ref.kb_id || !ref.doc_id) {
+    message.warning("缺少 kb_id / doc_id, 无法跳转预览");
+    return;
+  }
+  const url = router.resolve({
+    name: "knowledge-doc-preview",
+    params: { kbId: ref.kb_id, docId: ref.doc_id },
+  }).href;
+  window.open(url, "_blank");
 }
 
 function onTestAgent() {
@@ -1522,6 +1658,75 @@ onMounted(() => {
   gap: 16px;
   font-size: 12px;
   color: var(--color-text-quaternary);
+}
+
+/* RAG references */
+.rag-refs {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--surface-divider, #eee);
+}
+.rag-refs-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+.rag-refs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rag-ref-card {
+  padding: 10px 12px;
+  border: 1px solid var(--surface-divider, #eee);
+  border-radius: 8px;
+  background: var(--color-bg-elevated, rgba(0, 0, 0, 0.02));
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.rag-ref-card:hover {
+  border-color: var(--color-primary, #1677ff);
+  background: var(--color-info-bg, rgba(22, 119, 255, 0.05));
+}
+.rag-ref-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.rag-ref-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.rag-ref-sim {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.rag-ref-snippet {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  max-height: 4.5em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.rag-ref-foot {
+  margin-top: 6px;
+}
+.rag-ref-code {
+  display: inline-block;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 /* 空状态 */

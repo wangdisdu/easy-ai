@@ -108,7 +108,10 @@ class AgentRunRequest(BaseModel):
 
 class RagRunRequest(BaseModel):
     app_id: int = 0
-    query: str
+    # 单轮兼容:query 是最后一条用户问题
+    query: str = ""
+    # 多轮上下文:messages 非空时,query 自动取最后一条 user 消息的 content
+    messages: list[ModelGatewayChatMessage] = Field(default_factory=list)
     variables: dict[str, Any] = Field(default_factory=dict)
 
 
