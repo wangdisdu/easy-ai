@@ -43,13 +43,13 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.sse import (
-    SSE_EVENT_DONE,
-    SSE_EVENT_ERROR,
-    SSE_EVENT_MESSAGE_COMPLETE,
-    SSE_EVENT_METADATA,
-    SSE_EVENT_REFERENCES,
-    SSE_EVENT_TOKEN,
-    format_sse_event,
+    ExtReferences,
+    MessageStreamState,
+    RunError,
+    RunFinished,
+    RunStarted,
+    StreamEvent,
+    new_run_id,
 )
 from app.db.session import SessionLocal
 from app.model.kb_model import KbRetrieveHit, KbRetrieveReq
@@ -216,35 +216,32 @@ class RagApp:
         req_ctx: RequestContext,
         *,
         request_type: str = "chat",
-    ) -> AsyncGenerator[str, None]:
-        """真 token-level RAG SSE 流。
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """真 token-level RAG 流，按协议 v1 产出 StreamEvent 对象。
 
         阶段:
         1. 在 worker thread 跑 ``_prepare_stream``(retrieve + 可选 summary +
            拼 prompt + 构 runtime_config),同步 DB 操作不阻塞 event loop
-        2. yield metadata + references 元数据
+        2. run.started + ext.references
         3. 用 ``ModelGatewayService.chat_completion_stream`` 拉 LLM 流,
-           逐 delta 转 SSE token 事件
-        4. yield message_complete + done
+           逐 delta 转 block.delta（经块状态机）
+        4. run.finished（usage / sources / latency 进 ext）
         """
         started_at = time.perf_counter()
+        run_id = new_run_id()
         try:
-            prep = await asyncio.to_thread(
-                self._prepare_stream, req, req_ctx, request_type
-            )
+            prep = await asyncio.to_thread(self._prepare_stream, req, req_ctx, request_type)
         except ServiceError as e:
-            yield format_sse_event(SSE_EVENT_ERROR, {"code": e.code, "message": e.msg})
-            yield format_sse_event(SSE_EVENT_DONE, {"latency_ms": 0})
+            yield RunError(run_id=run_id, code=str(e.code), message=e.msg)
             return
         except Exception as e:
             logger.exception("[rag] stream prepare failed")
-            yield format_sse_event(SSE_EVENT_ERROR, {"message": str(e)})
-            yield format_sse_event(SSE_EVENT_DONE, {"latency_ms": 0})
+            yield RunError(run_id=run_id, code="INTERNAL_ERROR", message=str(e))
             return
 
-        yield format_sse_event(
-            SSE_EVENT_METADATA,
-            {
+        yield RunStarted(
+            run_id=run_id,
+            ext={
                 "app_id": str(req.app_id),
                 "app_type": "rag",
                 "model": prep["runtime_config"].model,
@@ -254,12 +251,12 @@ class RagApp:
         )
 
         if prep["references"]:
-            yield format_sse_event(
-                SSE_EVENT_REFERENCES, {"items": prep["references"]}
-            )
+            yield ExtReferences(run_id=run_id, ext_version=1, items=prep["references"])
 
+        msg = MessageStreamState(run_id)
         # 真 token 流。日志由 model_gateway 内部聚合落地。
         usage: dict[str, Any] = {}
+        stream_error: str | None = None
         log_db = SessionLocal()
         try:
             async for ev in self._model_gateway_service.chat_completion_stream(
@@ -274,20 +271,29 @@ class RagApp:
                 request_type=request_type,
             ):
                 if "delta" in ev:
-                    yield format_sse_event(SSE_EVENT_TOKEN, {"content": ev["delta"]})
+                    for out in msg.text(ev["delta"]):
+                        yield out
                 elif "usage" in ev:
                     usage = ev["usage"]
                 elif "error" in ev:
-                    yield format_sse_event(SSE_EVENT_ERROR, {"message": ev["error"]})
+                    stream_error = str(ev["error"])
         finally:
             log_db.close()
 
+        for out in msg.finish():
+            yield out
+
+        if stream_error is not None:
+            yield RunError(run_id=run_id, code="INTERNAL_ERROR", message=stream_error)
+            return
+
         sources = self._references_to_sources(prep["references"])
-        yield format_sse_event(
-            SSE_EVENT_MESSAGE_COMPLETE, {"usage": usage, "sources": sources}
-        )
         latency_ms = int((time.perf_counter() - started_at) * 1000)
-        yield format_sse_event(SSE_EVENT_DONE, {"latency_ms": latency_ms})
+        yield RunFinished(
+            run_id=run_id,
+            stop_reason="end_turn",
+            ext={"usage": usage, "sources": sources, "latency_ms": latency_ms},
+        )
 
     def _prepare_stream(
         self,
@@ -409,9 +415,7 @@ class RagApp:
             top_k=int(app_config.get("top_n") or app_config.get("top_k") or 5),
             similarity_threshold=float(app_config.get("similarity_threshold") or 0.2),
             vector_similarity_weight=float(
-                app_config.get("vector_weight")
-                or app_config.get("vector_similarity_weight")
-                or 0.3
+                app_config.get("vector_weight") or app_config.get("vector_similarity_weight") or 0.3
             ),
             rerank_id=rerank_id,
         )
@@ -443,9 +447,7 @@ class RagApp:
             logger.warning("[rag] summary model %r unavailable: %s", model_name, e.msg)
             return None
 
-        summary_prompt_tmpl = (
-            app_config.get("summary_prompt") or DEFAULT_SUMMARY_PROMPT
-        )
+        summary_prompt_tmpl = app_config.get("summary_prompt") or DEFAULT_SUMMARY_PROMPT
         chunks_block = self._format_context(hits)
         sys_prompt = summary_prompt_tmpl.replace("{{chunks}}", chunks_block)
         user_prompt = f"User question: {query}\n\n请输出精炼后的相关上下文。"
@@ -475,9 +477,7 @@ class RagApp:
         cls, app_config: dict[str, Any], context_block: str, question: str
     ) -> str:
         template = app_config.get("rag_prompt_template") or DEFAULT_RAG_PROMPT_TEMPLATE
-        rendered = template.replace("{{context}}", context_block).replace(
-            "{{question}}", question
-        )
+        rendered = template.replace("{{context}}", context_block).replace("{{question}}", question)
         base = app_config.get("system_prompt")
         if isinstance(base, str) and base.strip():
             return f"{base.strip()}\n\n{rendered}"
@@ -492,7 +492,7 @@ class RagApp:
             body = (hit.content or "").strip()
             if len(body) > _CHUNK_TRUNCATE_CHARS:
                 body = body[:_CHUNK_TRUNCATE_CHARS] + "..."
-            parts.append(f"[#{i}] [[doc:{ref}]] from \"{name}\":\n{body}")
+            parts.append(f'[#{i}] [[doc:{ref}]] from "{name}":\n{body}')
         return "\n\n".join(parts)
 
     @staticmethod

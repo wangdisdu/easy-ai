@@ -18,6 +18,14 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
+from app.core.sse import (
+    BlockDelta,
+    BlockStarted,
+    RunFinished,
+    StreamEvent,
+    ToolStarted,
+    ToolUpdated,
+)
 from app.db.schema import TbApp, TbConversation, TbConversationMessage, TbSessionAudit
 from app.model.conversation_model import (
     ConversationCreateReq,
@@ -293,7 +301,7 @@ class ConversationService:
         conversation_id: int,
         content: str,
         req_ctx: RequestContext,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         from app.db.session import SessionLocal
 
         conv = self._get_own_conversation(db, conversation_id, req_ctx.user_id)
@@ -451,7 +459,7 @@ class ConversationService:
         hitl_id: str,
         req: HitlResponseReq,
         req_ctx: RequestContext,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         """HITL 用户响应到达后续跑被 interrupt() 暂停的 agent。
 
         - 校验会话归属、应用类型为 agent
@@ -486,10 +494,13 @@ class ConversationService:
             thread_id=thread_id,
             use_checkpoint=True,
             degraded=False,
+            parent_run_id=req.parent_run_id,
         )
-        hitl_response: dict[str, Any] = {"action": req.action}
-        if req.action == "modify" and isinstance(req.parameters, dict):
-            hitl_response["parameters"] = req.parameters
+        action = req.outcome.action
+        hitl_response: dict[str, Any] = {"action": action}
+        params = req.outcome.resolved_parameters
+        if action == "modify" and isinstance(params, dict):
+            hitl_response["parameters"] = params
 
         inner_gen = self._agent_app.resume_stream(
             db=SessionLocal(),
@@ -504,69 +515,51 @@ class ConversationService:
 
     async def _consume_and_save_stream(
         self,
-        inner_gen: AsyncGenerator[str, None],
+        inner_gen: AsyncGenerator[StreamEvent, None],
         conversation_id: int,
-    ) -> AsyncGenerator[str, None]:
-        """透传 SSE 同时收集 token / 工具调用 / 元数据；在末尾把 assistant + tool 消息持久化。"""
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """透传结构化事件，同时聚合正文 / 工具调用 / 元数据；末尾持久化 assistant + tool 消息。
+
+        协议单一事实源：消费 ``StreamEvent`` 对象，不再反解析 SSE 文本。
+        """
         from app.db.session import SessionLocal
 
         full_content = ""
         tool_calls: list[dict[str, Any]] = []
         metadata_extra: dict[str, Any] = {}
+        # 只把文本块的 delta 计入正文；thought / tool_use 块排除。
+        text_blocks: set[tuple[str, int]] = set()
 
         try:
-            async for chunk in inner_gen:
-                if chunk.startswith("event: token\n"):
-                    try:
-                        data_line = chunk.split("data: ", 1)[1].split("\n")[0]
-                        token_data = json.loads(data_line)
-                        full_content += token_data.get("content", "")
-                    except (IndexError, json.JSONDecodeError):
-                        pass
-                elif chunk.startswith("event: tool_call_start\n"):
-                    try:
-                        data_line = chunk.split("data: ", 1)[1].split("\n")[0]
-                        tc_data = json.loads(data_line)
-                        tool_calls.append(
-                            {
-                                "tool_call_id": tc_data.get("tool_call_id", ""),
-                                "name": tc_data.get("name", ""),
-                                "arguments": tc_data.get("arguments"),
-                                "status": "running",
-                                "result": None,
-                            }
-                        )
-                    except (IndexError, json.JSONDecodeError):
-                        pass
-                elif chunk.startswith("event: tool_call_end\n"):
-                    try:
-                        data_line = chunk.split("data: ", 1)[1].split("\n")[0]
-                        tc_data = json.loads(data_line)
-                        tc_id = tc_data.get("tool_call_id", "")
-                        for tc in tool_calls:
-                            if tc["tool_call_id"] == tc_id:
-                                tc["result"] = tc_data.get("result", "")
-                                tc["status"] = tc_data.get("status", "success")
-                                break
-                    except (IndexError, json.JSONDecodeError):
-                        pass
-                elif chunk.startswith("event: message_complete\n"):
-                    try:
-                        data_line = chunk.split("data: ", 1)[1].split("\n")[0]
-                        mc_data = json.loads(data_line)
-                        metadata_extra["usage"] = mc_data.get("usage", {})
-                        metadata_extra["sources"] = mc_data.get("sources")
-                    except (IndexError, json.JSONDecodeError):
-                        pass
-                elif chunk.startswith("event: done\n"):
-                    try:
-                        data_line = chunk.split("data: ", 1)[1].split("\n")[0]
-                        done_data = json.loads(data_line)
-                        metadata_extra["latency_ms"] = done_data.get("latency_ms")
-                    except (IndexError, json.JSONDecodeError):
-                        pass
+            async for event in inner_gen:
+                if isinstance(event, BlockStarted) and event.block_type == "text":
+                    text_blocks.add((event.message_id, event.block_index))
+                elif isinstance(event, BlockDelta):
+                    if (event.message_id, event.block_index) in text_blocks:
+                        full_content += event.delta
+                elif isinstance(event, ToolStarted):
+                    tool_calls.append(
+                        {
+                            "tool_call_id": event.tool_call_id,
+                            "name": event.name,
+                            "arguments": event.arguments,
+                            "status": "running",
+                            "result": None,
+                        }
+                    )
+                elif isinstance(event, ToolUpdated):
+                    for tc in tool_calls:
+                        if tc["tool_call_id"] == event.tool_call_id:
+                            if event.result is not None:
+                                tc["result"] = event.result
+                            tc["status"] = event.status
+                            break
+                elif isinstance(event, RunFinished):
+                    metadata_extra["usage"] = event.ext.get("usage", {})
+                    metadata_extra["sources"] = event.ext.get("sources")
+                    metadata_extra["latency_ms"] = event.ext.get("latency_ms")
 
-                yield chunk
+                yield event
 
         finally:
             if full_content or tool_calls:

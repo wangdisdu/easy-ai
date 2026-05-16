@@ -14,7 +14,7 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext, build_request_context
 from app.core.response import Resp
-from app.core.sse import sse_response
+from app.core.sse import StreamEvent, sse_response
 from app.db.session import SessionLocal, get_db
 from app.model.open_model import (
     AgentRunRequest,
@@ -93,7 +93,7 @@ async def test_app_hitl_respond(
 ) -> StreamingResponse:
     """测试流专用 HITL 响应端点，不依赖 TbConversation 记录。
 
-    body: {"thread_id": "...", "action": "confirm"|"modify"|"reject", "parameters": {...}?}
+    body: {"thread_id", "hitl_id"?, "outcome": {"selected": {...}} | {"cancelled": true}}
     返回 SSE 流，与 send_message_stream 形态一致。
     """
     db = SessionLocal()
@@ -102,10 +102,12 @@ async def test_app_hitl_respond(
             app_id=app_id,
             thread_id=req.thread_id,
             use_checkpoint=True,
+            parent_run_id=req.parent_run_id,
         )
-        hitl_response: dict[str, Any] = {"action": req.action}
-        if req.parameters is not None:
-            hitl_response["parameters"] = req.parameters
+        hitl_response: dict[str, Any] = {"action": req.outcome.action}
+        params = req.outcome.resolved_parameters
+        if params is not None:
+            hitl_response["parameters"] = params
         generator = agent_app.resume_stream(
             db=db,
             req=agent_req,
@@ -126,7 +128,7 @@ def _dispatch_stream(
     req: AppRunReq,
     req_ctx: RequestContext,
     is_test: bool,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[StreamEvent, None]:
     """按应用类型分发到对应的流式执行方法。
 
     db session 的生命周期由各 stream() 方法内部管理（流前关闭，日志写入用独立 session）。

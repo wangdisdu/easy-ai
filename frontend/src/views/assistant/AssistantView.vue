@@ -121,8 +121,8 @@
                   <div class="chat-tool-row" @click="toggleToolExpand(tool.id || `${ti}-${tIdx}`)">
                     <span class="chat-tool-icon">{{ toolDisplayIcon((tool.metadata as Record<string, unknown>)?.tool_name as string, (tool.metadata as Record<string, unknown>)?.arguments as Record<string, unknown> | undefined) }}</span>
                     <span class="chat-tool-name">{{ toolDisplayName((tool.metadata as Record<string, unknown>)?.tool_name as string, (tool.metadata as Record<string, unknown>)?.arguments as Record<string, unknown> | undefined) }}</span>
-                    <span :class="[(tool.metadata as Record<string, unknown>)?.status === 'error' ? 'chat-tool-error' : 'chat-tool-done']">
-                      {{ (tool.metadata as Record<string, unknown>)?.status === 'error' ? 'error' : 'done' }}
+                    <span :class="[isToolFailed((tool.metadata as Record<string, unknown>)?.status) ? 'chat-tool-error' : 'chat-tool-done']">
+                      {{ isToolFailed((tool.metadata as Record<string, unknown>)?.status) ? 'error' : 'done' }}
                     </span>
                     <RightOutlined :class="['chat-tool-chevron', expandedTools.has(tool.id || `${ti}-${tIdx}`) ? 'chat-tool-chevron--open' : '']" />
                   </div>
@@ -291,9 +291,14 @@ interface MessageTurn {
 const isStreaming = ref(false);
 const streamingContent = ref("");
 const streamingToolCalls = ref<StreamingToolCall[]>([]);
+// 文本块 id 集合（`${message_id}:${block_index}`）：只把文本块 delta 计入正文，
+// thought / tool_use 块排除。跨 HITL 续跑（新 run）保留，新一轮发送时清空。
+let streamTextBlocks = new Set<string>();
 const streamAbort = ref<{ abort: () => void } | null>(null);
 // 待响应的 HITL 暂停（一次最多挂一个；后续工具调用会接着触发新的）
 const pendingHitl = ref<HitlPayload | null>(null);
+// 被中断 run 的 run_id（从 hitl.required 事件信封捕获），续跑回传作 parent_run_id
+const pendingHitlRunId = ref<string | null>(null);
 const hitlBusy = ref(false);
 
 // HITL 处理痕迹：用户确认 / 修改 / 拒绝 / 超时拒绝后，把卡片折成一行短记，
@@ -338,10 +343,8 @@ const streamMeta = reactive<{
 
 // ── 工具展示工具函数（共享 composable） ──
 import {
-  isSubagentTask,
   toolDisplayName,
   toolDisplayIcon,
-  isSubagentHitlStatus,
 } from "@/composables/useToolDisplay";
 
 // 应用选择器
@@ -378,6 +381,11 @@ const showTodoPanel = computed(
 // write_todos 一轮内可能多次刷，用 RAF 合并到下一帧避免抖动
 let pendingTodos: Todo[] | null = null;
 let todoRaf: number | null = null;
+// 历史工具消息的失败判定：兼容协议四态 failed 与旧词表 error
+function isToolFailed(status: unknown): boolean {
+  return status === "failed" || status === "error";
+}
+
 function applyTodoUpdate(next: Todo[]) {
   pendingTodos = next;
   if (todoRaf !== null) return;
@@ -625,7 +633,9 @@ function sendMessage() {
   isStreaming.value = true;
   streamingContent.value = "";
   streamingToolCalls.value = [];
+  streamTextBlocks = new Set();
   pendingHitl.value = null;
+  pendingHitlRunId.value = null;
   hitlBusy.value = false;
   resolvedHitls.value = [];
   hitlTimeoutFlag = false;
@@ -647,61 +657,82 @@ function buildStreamHandlers() {
   // 前端状态机可以在两个流里继续累积 token / tool_calls。
   return {
     onEvent(evt: SSEEvent) {
+      const d = evt.data;
       switch (evt.event) {
-        case "metadata":
-          if (!streamMeta.model) streamMeta.model = (evt.data.model as string) || "";
-          if (evt.data.degraded) {
+        case "run.started": {
+          const ext = (d.ext as Record<string, unknown>) || {};
+          if (!streamMeta.model) streamMeta.model = (ext.model as string) || "";
+          if (ext.degraded) {
             message.warning(
               "历史已降级恢复：消息保留，但 agent 的待办、虚拟工作文件、工具中间态丢失",
               6,
             );
           }
           break;
-        case "todo_update":
-          applyTodoUpdate((evt.data.todos as Todo[]) || []);
+        }
+        case "plan.updated": {
+          const entries = (d.entries as Array<{ content?: string; status?: string }>) || [];
+          applyTodoUpdate(
+            entries.map((e) => ({
+              content: e.content || "",
+              status: (e.status || "pending") as Todo["status"],
+            })) as Todo[],
+          );
           break;
-        case "token":
-          streamingContent.value += (evt.data.content as string) || "";
-          scrollToBottom();
+        }
+        case "block.started":
+          if (d.block_type === "text") {
+            streamTextBlocks.add(`${d.message_id}:${d.block_index}`);
+          }
           break;
-        case "tool_call_start":
+        case "block.delta":
+          if (streamTextBlocks.has(`${d.message_id}:${d.block_index}`)) {
+            streamingContent.value += (d.delta as string) || "";
+            scrollToBottom();
+          }
+          break;
+        case "tool.started":
           streamingToolCalls.value.push({
-            tool_call_id: (evt.data.tool_call_id as string) || "",
-            name: (evt.data.name as string) || "",
+            tool_call_id: (d.tool_call_id as string) || "",
+            name: (d.name as string) || "",
             status: "running",
-            arguments: evt.data.arguments as Record<string, unknown> | undefined,
+            arguments: d.arguments as Record<string, unknown> | undefined,
           });
           scrollToBottom();
           break;
-        case "tool_call_end": {
-          const id = evt.data.tool_call_id as string;
-          const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
+        case "tool.updated": {
+          const tc = streamingToolCalls.value.find(
+            (t) => t.tool_call_id === (d.tool_call_id as string),
+          );
           if (tc) {
-            const evtStatus = (evt.data.status as string) || "";
-            tc.status = evtStatus === "error" ? "error" : evtStatus === "subagent_hitl" ? "subagent_hitl" : "success";
-            tc.result = isSubagentHitlStatus(evtStatus) ? "" : (evt.data.result as string) || "";
+            const st = (d.status as string) || "";
+            // completed→success；failed→error；pending/in_progress 仍视为运行中
+            // （子代理 HITL 暂停由后续 hitl.required 接管）
+            tc.status = st === "completed" ? "success" : st === "failed" ? "error" : "running";
+            if (d.result != null) tc.result = (d.result as string) || "";
           }
           break;
         }
-        case "tool_hitl_required":
-          pendingHitl.value = evt.data as unknown as HitlPayload;
+        case "hitl.required":
+          pendingHitl.value = d as unknown as HitlPayload;
+          pendingHitlRunId.value = (d.run_id as string) || null;
           scrollToBottom();
           break;
-        case "references":
-          // RAG 应用流式专属:富结构引用列表(含 doc_name),用于把
-          // [[doc:xxx]] 渲染时连带文档名显示
+        case "ext.references":
+          // RAG 流式专属:富结构引用列表(含 doc_name),把 [[doc:xxx]]
+          // 渲染时连带文档名显示
           streamMeta.references =
-            (evt.data.items as Array<{ doc_ref?: string | null; doc_name?: string | null }>) ?? [];
+            (d.items as Array<{ doc_ref?: string | null; doc_name?: string | null }>) ?? [];
           break;
-        case "message_complete":
-          streamMeta.usage = (evt.data.usage as Record<string, unknown>) ?? null;
-          streamMeta.sources = (evt.data.sources as string[]) ?? [];
+        case "run.finished": {
+          const ext = (d.ext as Record<string, unknown>) || {};
+          streamMeta.usage = (ext.usage as Record<string, unknown>) ?? null;
+          streamMeta.sources = (ext.sources as string[]) ?? [];
+          streamMeta.latency_ms = (ext.latency_ms as number) ?? null;
           break;
-        case "done":
-          streamMeta.latency_ms = (evt.data.latency_ms as number) ?? null;
-          break;
-        case "error":
-          message.error((evt.data.message as string) || "执行出错");
+        }
+        case "run.error":
+          message.error((d.message as string) || "执行出错");
           break;
       }
     },
@@ -714,6 +745,7 @@ function buildStreamHandlers() {
       isStreaming.value = false;
       streamingContent.value = "";
       streamingToolCalls.value = [];
+      streamTextBlocks = new Set();
       resolvedHitls.value = [];
 
       if (currentConversation.value) {
@@ -753,14 +785,14 @@ function onHitlRespond(action: HitlAction, parameters?: Record<string, unknown>)
     modified: action === "modify",
     time: Date.now(),
   });
-  // 清掉卡片，等续跑流自然把 tool_call_end / token / 新的 hitl_required 推回来
+  const parentRunId = pendingHitlRunId.value ?? undefined;
+  // 清掉卡片，等续跑流自然把 tool.updated / block.delta / 新的 hitl.required 推回来
   pendingHitl.value = null;
-  const body: convApi.HitlResponseBody = { action };
-  if (action === "modify" && parameters) body.parameters = parameters;
+  pendingHitlRunId.value = null;
   streamAbort.value = convApi.respondHitlStream(
     currentConversation.value.id,
     hitlId,
-    body,
+    convApi.buildHitlBody(action, parameters, parentRunId),
     buildStreamHandlers(),
   );
 }
@@ -770,6 +802,7 @@ function stopStream() {
   streamAbort.value = null;
   isStreaming.value = false;
   pendingHitl.value = null;
+  pendingHitlRunId.value = null;
   hitlBusy.value = false;
   resolvedHitls.value = [];
   hitlTimeoutFlag = false;

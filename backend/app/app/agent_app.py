@@ -30,17 +30,15 @@ from app.core.mcp_client import call_tool as mcp_call_tool
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
 from app.core.sse import (
-    SSE_EVENT_DONE,
-    SSE_EVENT_ERROR,
-    SSE_EVENT_MESSAGE_COMPLETE,
-    SSE_EVENT_METADATA,
-    SSE_EVENT_TODO_UPDATE,
-    SSE_EVENT_TOKEN,
-    SSE_EVENT_TOOL_CALL_END,
-    SSE_EVENT_TOOL_CALL_START,
-    SSE_EVENT_TOOL_HITL_REQUIRED,
-    format_sse_done,
-    format_sse_event,
+    DEFAULT_HITL_OPTIONS,
+    HitlRequired,
+    MessageStreamState,
+    PlanUpdated,
+    RunError,
+    RunFinished,
+    RunStarted,
+    StreamEvent,
+    new_run_id,
 )
 from app.db.schema import TbApp, TbAppSkill, TbAppTool, TbMcpServer, TbSkill, TbSkillTool, TbTool
 from app.db.session import SessionLocal
@@ -103,6 +101,31 @@ def _serialize_todos(todos: Any) -> list[dict[str, str]]:
     return out
 
 
+_TODO_STATUS_MAP = {
+    "pending": "pending",
+    "in_progress": "in_progress",
+    "completed": "completed",
+    # 兼容历史/别名取值
+    "done": "completed",
+    "running": "in_progress",
+    "todo": "pending",
+}
+
+
+def _todos_to_entries(todos: Any) -> list[dict[str, Any]]:
+    """LangChain Todo 列表 → 协议 plan.updated 的 entries（三态 + priority）。"""
+    entries: list[dict[str, Any]] = []
+    for t in _serialize_todos(todos):
+        entries.append(
+            {
+                "content": t["content"],
+                "status": _TODO_STATUS_MAP.get(t["status"], "pending"),
+                "priority": "medium",
+            }
+        )
+    return entries
+
+
 def _describe_exception(exc: BaseException) -> str:
     """给 ServiceError message 取一个有信息量的描述。
 
@@ -115,6 +138,20 @@ def _describe_exception(exc: BaseException) -> str:
     while isinstance(current, BaseExceptionGroup) and current.exceptions:
         current = current.exceptions[0]
     return f"{type(current).__name__}: {current}"
+
+
+# 工具运行时失败不再 raise 杀图，而是把失败原因作为"工具观测"返回给模型，
+# 由模型决定调整参数重试 / 换路径 / 如实向用户说明（自愈）。前缀供协议层
+# 在 on_tool_end 把这次调用判为 failed（而非 completed），UI 仍显示失败。
+TOOL_ERROR_SENTINEL = "⟪TOOL_INVOCATION_FAILED⟫"
+
+
+def _tool_error_observation(reason: str) -> str:
+    return (
+        f"{TOOL_ERROR_SENTINEL} 工具调用失败：{reason}\n"
+        "请判断是否可调整参数后重试；若多次失败或确实无法完成，"
+        "请如实向用户说明原因，不要编造结果。"
+    )
 
 
 @dataclass
@@ -130,6 +167,7 @@ class _Prepared:
     thread_id: str | None
     use_checkpoint: bool
     degraded: bool
+    parent_run_id: str | None
 
     def invoke_config(self, handler: Any) -> dict[str, Any]:
         """组装 ainvoke / astream_events 的 config。
@@ -226,7 +264,7 @@ class AgentApp:
         req_ctx: RequestContext,
         *,
         request_type: str = "api",
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         """流式执行 Agent 应用，通过 SSE 事件输出 token 和工具调用过程。
 
         db 会在流开始前关闭；日志写入在 finally 块中使用独立 session。
@@ -247,7 +285,7 @@ class AgentApp:
         *,
         hitl_response: dict[str, Any],
         request_type: str = "chat",
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         """HITL 用户响应到达后续跑被 interrupt() 暂停的 agent。
 
         与 stream 共享 _prepare（同一会话同一线程，agent 工具与中间件配置必须保持一致），
@@ -272,7 +310,7 @@ class AgentApp:
         *,
         request_type: str,
         emit_initial_todos: bool,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[StreamEvent, None]:
         """stream / resume_stream 共用的事件循环；agent_input 决定是新发起还是 resume。"""
         handler = CallbackHandler()
         started_at = time.perf_counter()
@@ -285,16 +323,22 @@ class AgentApp:
         error_message: str | None = None
         trace_id: str | None = None
 
-        metadata_event: dict[str, Any] = {
+        run_id = new_run_id()
+        msg = MessageStreamState(run_id)
+
+        ext: dict[str, Any] = {
             "app_id": str(prep.app.id),
             "app_type": prep.app.app_type,
             "model": prep.runtime_config.model,
         }
-        if prep.use_checkpoint and prep.thread_id:
-            metadata_event["thread_id"] = prep.thread_id
         if prep.degraded:
-            metadata_event["degraded"] = True
-        yield format_sse_event(SSE_EVENT_METADATA, metadata_event)
+            ext["degraded"] = True
+        yield RunStarted(
+            run_id=run_id,
+            ext=ext,
+            thread_id=prep.thread_id if (prep.use_checkpoint and prep.thread_id) else None,
+            parent_run_id=prep.parent_run_id,
+        )
 
         # 初始 todos 快照：用户重新打开会话发消息时，先把 checkpoint 里已有的
         # todos 推一次，避免 panel 留白等下一次 write_todos。resume 路径不需要重发。
@@ -304,9 +348,9 @@ class AgentApp:
                 ckpt = await saver.aget_tuple({"configurable": {"thread_id": prep.thread_id}})
                 if ckpt is not None:
                     existing = ckpt.checkpoint.get("channel_values", {}).get("todos")
-                    serialized = _serialize_todos(existing)
-                    if serialized:
-                        yield format_sse_event(SSE_EVENT_TODO_UPDATE, {"todos": serialized})
+                    entries = _todos_to_entries(existing)
+                    if entries:
+                        yield PlanUpdated(run_id=run_id, entries=entries)
             except Exception:
                 logger.warning(
                     "failed to load initial todos snapshot for thread %s",
@@ -344,7 +388,8 @@ class AgentApp:
                         chunk = data.get("chunk")
                         if chunk and hasattr(chunk, "content") and chunk.content:
                             full_content += chunk.content
-                            yield format_sse_event(SSE_EVENT_TOKEN, {"content": chunk.content})
+                            for ev in msg.text(chunk.content):
+                                yield ev
                         usage = getattr(chunk, "usage_metadata", None) if chunk else None
                         if isinstance(usage, dict) and usage.get("total_tokens"):
                             usage_found = True
@@ -352,29 +397,25 @@ class AgentApp:
                                 accumulated[key] += usage.get(key, 0)
 
                     elif kind == "on_tool_start":
-                        run_id = event.get("run_id", "")
+                        tool_call_id = event.get("run_id", "")
                         tool_name = event.get("name", "")
-                        tool_call_starts[run_id] = (tool_name, time.perf_counter())
+                        tool_call_starts[tool_call_id] = (tool_name, time.perf_counter())
                         logger.info(
                             "[stream] thread=%s tool_start name=%s run_id=%s",
                             prep.thread_id,
                             tool_name,
-                            run_id,
+                            tool_call_id,
                         )
-                        yield format_sse_event(
-                            SSE_EVENT_TOOL_CALL_START,
-                            {
-                                "tool_call_id": run_id,
-                                "name": tool_name,
-                                "arguments": data.get("input", {}),
-                            },
-                        )
+                        for ev in msg.tool_start(
+                            tool_call_id, tool_name, data.get("input", {}) or {}
+                        ):
+                            yield ev
 
                     elif kind == "on_tool_end":
-                        run_id = event.get("run_id", "")
+                        tool_call_id = event.get("run_id", "")
                         tool_name = event.get("name", "")
-                        if run_id in tool_call_starts:
-                            _, t0 = tool_call_starts.pop(run_id)
+                        if tool_call_id in tool_call_starts:
+                            _, t0 = tool_call_starts.pop(tool_call_id)
                             elapsed = time.perf_counter() - t0
                             logger.info(
                                 "[stream] thread=%s tool_end name=%s elapsed=%.2fs",
@@ -385,38 +426,38 @@ class AgentApp:
                         output = data.get("output", "")
                         if hasattr(output, "content"):
                             output = output.content
-                        yield format_sse_event(
-                            SSE_EVENT_TOOL_CALL_END,
-                            {
-                                "tool_call_id": run_id,
-                                "name": tool_name,
-                                "result": str(output) if output else "",
-                                "status": "success",
-                            },
-                        )
+                        out_str = str(output) if output else ""
+                        # 工具运行时失败现已返回错误观测（不再 raise 杀图），
+                        # 据前缀把这次调用判为 failed，并剥掉 sentinel 再上报，
+                        # UI / 落库结果保持干净（模型那侧已拿到完整观测自愈）。
+                        if out_str.startswith(TOOL_ERROR_SENTINEL):
+                            tool_status = "failed"
+                            tool_result = out_str[len(TOOL_ERROR_SENTINEL) :].lstrip()
+                        else:
+                            tool_status = "completed"
+                            tool_result = out_str
+                        for ev in msg.tool_end(tool_call_id, tool_status, tool_result):
+                            yield ev
                         # write_todos 工具的入参就是新的 todos 全量快照，
-                        # 借这个事件推一条 todo_update 给前端，不用额外读 state。
+                        # 借这个事件推一条 plan.updated 给前端，不用额外读 state。
                         if tool_name == "write_todos":
                             tool_input = data.get("input") or {}
                             new_todos = (
                                 tool_input.get("todos") if isinstance(tool_input, dict) else None
                             )
-                            yield format_sse_event(
-                                SSE_EVENT_TODO_UPDATE,
-                                {"todos": _serialize_todos(new_todos)},
-                            )
+                            yield PlanUpdated(run_id=run_id, entries=_todos_to_entries(new_todos))
 
                     elif kind == "on_tool_error":
-                        run_id = event.get("run_id", "")
+                        tool_call_id = event.get("run_id", "")
                         tool_name = event.get("name", "")
                         error = data.get("error")
                         subagent_hitl = _is_subagent_hitl_interrupt(error)
-                        if run_id in tool_call_starts:
-                            _, t0 = tool_call_starts.pop(run_id)
+                        if tool_call_id in tool_call_starts:
+                            _, t0 = tool_call_starts.pop(tool_call_id)
                             elapsed = time.perf_counter() - t0
                             if subagent_hitl:
                                 logger.info(
-                                    "[stream] thread=%s tool_end name=%s elapsed=%.2fs (subagent hitl)",
+                                    "[stream] thread=%s tool_end name=%s elapsed=%.2fs (sub hitl)",
                                     prep.thread_id,
                                     tool_name,
                                     elapsed,
@@ -429,49 +470,56 @@ class AgentApp:
                                     elapsed,
                                     error,
                                 )
-                        yield format_sse_event(
-                            SSE_EVENT_TOOL_CALL_END,
-                            {
-                                "tool_call_id": run_id,
-                                "name": tool_name,
-                                "result": "" if subagent_hitl else str(error or ""),
-                                "status": "subagent_hitl" if subagent_hitl else "error",
-                            },
-                        )
+                        # 子代理 HITL：工具未失败而是被 interrupt 暂停，按协议
+                        # 归位到 hitl.required（流末尾统一收集），此处仅保持
+                        # 工具块状态为 pending；普通报错则 failed。
+                        if subagent_hitl:
+                            for ev in msg.tool_end(tool_call_id, "pending", None):
+                                yield ev
+                        else:
+                            for ev in msg.tool_end(tool_call_id, "failed", str(error or "")):
+                                yield ev
 
             if usage_found:
                 token_usage = dict(accumulated)
 
             # astream_events 自然结束后，若 PolicyMiddleware 调用过 interrupt()，
             # LangGraph 会把 pending interrupt 写在 state.tasks[].interrupts 上。
-            # 把每条匹配 type=tool_hitl_required 的载荷推 SSE，并写一条 hitl_required 审计。
-            for hitl_payload in await self._collect_pending_hitl(prep):
-                yield format_sse_event(SSE_EVENT_TOOL_HITL_REQUIRED, hitl_payload)
-                self._audit_hitl_required(hitl_payload, prep, req_ctx)
+            pending_hitl = await self._collect_pending_hitl(prep)
 
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             trace_id = handler.last_trace_id
 
-            yield format_sse_event(
-                SSE_EVENT_MESSAGE_COMPLETE,
-                {"content": full_content, "usage": token_usage},
+            for ev in msg.finish():
+                yield ev
+
+            if pending_hitl:
+                # 协议：hitl.required 后本段流不再有 run.finished，
+                # 由前端经续跑端点应答后开启新的一段流。
+                for payload in pending_hitl:
+                    yield HitlRequired(
+                        run_id=run_id,
+                        hitl_id=str(payload.get("hitl_id") or ""),
+                        tool_call_id=str(payload.get("tool_call_id") or ""),
+                        tool_name=str(payload.get("tool_name") or ""),
+                        risk_level=str(payload.get("risk_level") or "low").lower(),
+                        options=DEFAULT_HITL_OPTIONS,
+                    )
+                    self._audit_hitl_required(payload, prep, req_ctx)
+                return
+
+            yield RunFinished(
+                run_id=run_id,
+                stop_reason="end_turn",
+                ext={"usage": token_usage, "latency_ms": latency_ms},
             )
-            yield format_sse_event(
-                SSE_EVENT_DONE,
-                {"latency_ms": latency_ms, **token_usage},
-            )
-            yield format_sse_done()
 
         except Exception as exc:
             success = False
             error_message = _describe_exception(exc)
             trace_id = handler.last_trace_id
             logger.exception("agent app %s stream failed", prep.app.id)
-            yield format_sse_event(
-                SSE_EVENT_ERROR,
-                {"code": "INTERNAL_ERROR", "message": error_message},
-            )
-            yield format_sse_done()
+            yield RunError(run_id=run_id, code="INTERNAL_ERROR", message=error_message)
 
         finally:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
@@ -592,6 +640,7 @@ class AgentApp:
             thread_id=req.thread_id,
             use_checkpoint=use_checkpoint,
             degraded=req.degraded,
+            parent_run_id=req.parent_run_id,
         )
 
     def _log_stream_finally(
@@ -913,24 +962,23 @@ class AgentApp:
                     time.perf_counter() - t0,
                 )
                 return result
-            except ServiceError:
-                logger.exception(
-                    "mcp tool %s raised ServiceError after %.2fs",
+            except ServiceError as exc:
+                logger.warning(
+                    "mcp tool %s failed after %.2fs: %s",
                     remote_tool_name,
                     time.perf_counter() - t0,
+                    exc.msg,
                 )
-                raise
+                return _tool_error_observation(f"MCP 工具 {remote_tool_name} 调用失败：{exc.msg}")
             except Exception as exc:
                 logger.exception(
                     "mcp tool %s invocation failed after %.2fs",
                     remote_tool_name,
                     time.perf_counter() - t0,
                 )
-                raise ServiceError(
-                    ErrorCode.INTERNAL_ERROR,
-                    f"mcp tool {remote_tool_name} invocation failed: "
-                    f"{_describe_exception(exc)}",
-                ) from exc
+                return _tool_error_observation(
+                    f"MCP 工具 {remote_tool_name} 调用失败：{_describe_exception(exc)}"
+                )
 
         return call_mcp_tool
 
@@ -1008,23 +1056,23 @@ class AgentApp:
                     time.perf_counter() - t0,
                 )
                 return response.text
-            except ServiceError:
-                logger.exception(
-                    "api tool %s raised ServiceError after %.2fs",
+            except ServiceError as exc:
+                logger.warning(
+                    "api tool %s failed after %.2fs: %s",
                     tool_name,
                     time.perf_counter() - t0,
+                    exc.msg,
                 )
-                raise
+                return _tool_error_observation(f"API 工具 {tool_name} 调用失败：{exc.msg}")
             except Exception as exc:
                 logger.exception(
                     "api tool %s invocation failed after %.2fs",
                     tool_name,
                     time.perf_counter() - t0,
                 )
-                raise ServiceError(
-                    ErrorCode.INTERNAL_ERROR,
-                    f"api tool {tool_name} invocation failed: {_describe_exception(exc)}",
-                ) from exc
+                return _tool_error_observation(
+                    f"API 工具 {tool_name} 调用失败：{_describe_exception(exc)}"
+                )
 
         return call_api_tool
 

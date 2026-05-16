@@ -18,13 +18,12 @@ from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
 from app.core.sse import (
-    SSE_EVENT_DONE,
-    SSE_EVENT_ERROR,
-    SSE_EVENT_MESSAGE_COMPLETE,
-    SSE_EVENT_METADATA,
-    SSE_EVENT_TOKEN,
-    format_sse_done,
-    format_sse_event,
+    MessageStreamState,
+    RunError,
+    RunFinished,
+    RunStarted,
+    StreamEvent,
+    new_run_id,
 )
 from app.db.schema import TbApp
 from app.model.open_model import LlmAppRunReq, ModelGatewayChatMessage
@@ -124,8 +123,8 @@ class LlmApp:
         req_ctx: RequestContext,
         *,
         request_type: str = "api",
-    ) -> AsyncGenerator[str, None]:
-        """流式执行 LLM 应用，通过 SSE 事件逐 token 输出。
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """流式执行 LLM 应用，按协议 v1 产出 StreamEvent 对象。
 
         db 会在流开始前关闭；日志写入在 finally 块中使用独立 session。
         """
@@ -141,9 +140,12 @@ class LlmApp:
         error_message: str | None = None
         trace_id: str | None = None
 
-        yield format_sse_event(
-            SSE_EVENT_METADATA,
-            {
+        run_id = new_run_id()
+        msg = MessageStreamState(run_id)
+
+        yield RunStarted(
+            run_id=run_id,
+            ext={
                 "app_id": str(prep.app.id),
                 "app_type": prep.app.app_type,
                 "model": prep.runtime_config.model,
@@ -160,7 +162,8 @@ class LlmApp:
                     chunk = event.get("data", {}).get("chunk")
                     if chunk and hasattr(chunk, "content") and chunk.content:
                         full_content += chunk.content
-                        yield format_sse_event(SSE_EVENT_TOKEN, {"content": chunk.content})
+                        for ev in msg.text(chunk.content):
+                            yield ev
                     # 提取 usage（通常在最后一个 chunk 上，单次模型调用以最新值为准）
                     usage = getattr(chunk, "usage_metadata", None)
                     if isinstance(usage, dict) and usage.get("total_tokens"):
@@ -173,25 +176,19 @@ class LlmApp:
             latency_ms = int((time.perf_counter() - started_at) * 1000)
             trace_id = handler.last_trace_id
 
-            yield format_sse_event(
-                SSE_EVENT_MESSAGE_COMPLETE,
-                {"content": full_content, "usage": token_usage},
+            for ev in msg.finish():
+                yield ev
+            yield RunFinished(
+                run_id=run_id,
+                stop_reason="end_turn",
+                ext={"usage": token_usage, "latency_ms": latency_ms},
             )
-            yield format_sse_event(
-                SSE_EVENT_DONE,
-                {"latency_ms": latency_ms, **token_usage},
-            )
-            yield format_sse_done()
 
         except Exception as exc:
             success = False
             error_message = str(exc)
             trace_id = handler.last_trace_id
-            yield format_sse_event(
-                SSE_EVENT_ERROR,
-                {"code": "INTERNAL_ERROR", "message": error_message},
-            )
-            yield format_sse_done()
+            yield RunError(run_id=run_id, code="INTERNAL_ERROR", message=error_message)
 
         finally:
             latency_ms = int((time.perf_counter() - started_at) * 1000)

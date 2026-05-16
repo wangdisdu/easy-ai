@@ -56,9 +56,29 @@ export function sendMessageStream(
 
 export type HitlAction = "confirm" | "modify" | "reject";
 
+/** 协议续跑请求体：outcome 二选一 selected / cancelled。 */
 export interface HitlResponseBody {
-  action: HitlAction;
-  parameters?: Record<string, unknown>;
+  hitl_id?: string;
+  /** 被中断 run 的 run_id（从 hitl.required 事件信封捕获），供审计追溯链接 */
+  parent_run_id?: string;
+  outcome:
+    | { selected: { option_id: HitlAction; parameters?: Record<string, unknown> } }
+    | { cancelled: true };
+}
+
+/** 由 action(+参数) 构造协议 outcome 请求体。 */
+export function buildHitlBody(
+  action: HitlAction,
+  parameters?: Record<string, unknown>,
+  parentRunId?: string,
+): HitlResponseBody {
+  const selected: { option_id: HitlAction; parameters?: Record<string, unknown> } = {
+    option_id: action,
+  };
+  if (action === "modify" && parameters) selected.parameters = parameters;
+  const body: HitlResponseBody = { outcome: { selected } };
+  if (parentRunId) body.parent_run_id = parentRunId;
+  return body;
 }
 
 export function respondHitlStream(

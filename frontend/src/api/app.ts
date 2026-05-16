@@ -112,8 +112,11 @@ export function testAppStream(
 
 export interface TestHitlRespondBody {
   thread_id: string;
-  action: string;
-  parameters?: Record<string, unknown>;
+  hitl_id?: string;
+  parent_run_id?: string;
+  outcome:
+    | { selected: { option_id: "confirm" | "modify" | "reject"; parameters?: Record<string, unknown> } }
+    | { cancelled: true };
 }
 
 export function testAppHitlRespondStream(

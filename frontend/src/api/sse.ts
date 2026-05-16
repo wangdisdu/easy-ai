@@ -1,11 +1,15 @@
 /**
- * SSE (Server-Sent Events) 客户端工具。
+ * Agent 流式通信协议 v1 客户端。
  *
- * 使用 fetch + ReadableStream 实现（不用 EventSource，因为 EventSource 仅支持 GET）。
+ * 传输：fetch + ReadableStream（POST body，非 EventSource）。
+ * 帧：`data: <json>\n\n`，事件类型在 JSON 载荷的 `type` 字段（不使用 SSE
+ * `event:` 行，信封传输无关）。流以 `data: [DONE]` 收尾。
  */
 
 export interface SSEEvent {
+  /** 事件类型，取自载荷 `type` 字段（如 run.started / block.delta）。 */
   event: string;
+  /** 完整事件载荷（含 type/v/seq/run_id 信封字段）。 */
   data: Record<string, unknown>;
 }
 
@@ -17,7 +21,7 @@ export interface SSEOptions {
 }
 
 /**
- * 向指定 URL 发起 POST 请求并以 SSE 协议解析流式响应。
+ * 向指定 URL 发起 POST 请求并按协议解析流式响应。
  */
 export async function fetchSSE(
   url: string,
@@ -46,7 +50,6 @@ export async function fetchSSE(
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let currentEvent = "";
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -59,24 +62,17 @@ export async function fetchSSE(
     buffer = lines.pop()!;
 
     for (const line of lines) {
-      if (line.startsWith("event: ")) {
-        currentEvent = line.slice(7).trim();
-      } else if (line.startsWith("data: ")) {
-        const raw = line.slice(6);
-        if (raw === "[DONE]") {
-          options.onDone?.();
-          return;
-        }
-        try {
-          const data = JSON.parse(raw) as Record<string, unknown>;
-          options.onEvent({ event: currentEvent, data });
-        } catch {
-          // 跳过无法解析的 data 行
-        }
+      if (!line.startsWith("data: ")) continue;
+      const raw = line.slice(6);
+      if (raw === "[DONE]") {
+        options.onDone?.();
+        return;
       }
-      // 空行重置 currentEvent（SSE 协议中事件边界）
-      if (line === "") {
-        currentEvent = "";
+      try {
+        const data = JSON.parse(raw) as Record<string, unknown>;
+        options.onEvent({ event: String(data.type ?? ""), data });
+      } catch {
+        // 跳过无法解析的 data 行
       }
     }
   }

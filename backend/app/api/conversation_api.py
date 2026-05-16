@@ -134,7 +134,7 @@ async def respond_hitl(
 ) -> StreamingResponse:
     """对 PolicyMiddleware 触发的 HITL interrupt 提交用户响应并续跑 agent。
 
-    body: {"action": "confirm"|"modify"|"reject", "parameters": {...}?}
+    body: {"hitl_id"?, "outcome": {"selected": {"option_id", "parameters"?}} | {"cancelled": true}}
     返回 SSE 流，与 send_message_stream 形态一致。
     """
     db = SessionLocal()

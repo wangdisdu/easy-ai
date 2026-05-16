@@ -730,9 +730,13 @@ interface TokenUsage {
 const isStreaming = ref(false);
 const streamingContent = ref("");
 const streamingToolCalls = ref<StreamingToolCall[]>([]);
+// 文本块 id 集合（`${message_id}:${block_index}`）：仅文本块 delta 计入正文。
+let streamTextBlocks = new Set<string>();
 const streamAbort = ref<{ abort: () => void } | null>(null);
 const userMessageText = ref("");
 const pendingHitl = ref<HitlPayload | null>(null);
+// 被中断 run 的 run_id（从 hitl.required 信封捕获），续跑回传作 parent_run_id
+const pendingHitlRunId = ref<string | null>(null);
 const hitlBusy = ref(false);
 const currentThreadId = ref<string | null>(null);
 let hitlTimeoutFlag = false;
@@ -756,7 +760,6 @@ import {
   isSubagentTask,
   toolDisplayName,
   toolDisplayIcon,
-  isSubagentHitlStatus,
 } from "@/composables/useToolDisplay";
 
 interface ParsedMessage {
@@ -1108,12 +1111,14 @@ async function onDelete() {
 function resetStreamState() {
   streamingContent.value = "";
   streamingToolCalls.value = [];
+  streamTextBlocks = new Set();
   userMessageText.value = "";
   streamMeta.model = "";
   streamMeta.latency_ms = null;
   streamMeta.tokenUsage = null;
   streamAbort.value = null;
   pendingHitl.value = null;
+  pendingHitlRunId.value = null;
   hitlBusy.value = false;
   currentThreadId.value = null;
   hitlTimeoutFlag = false;
@@ -1121,48 +1126,59 @@ function resetStreamState() {
 }
 
 function handleStreamEvent(evt: SSEEvent) {
+  const d = evt.data;
   switch (evt.event) {
-    case "metadata":
-      streamMeta.model = (evt.data.model as string) || "";
-      if (evt.data.thread_id) currentThreadId.value = evt.data.thread_id as string;
+    case "run.started": {
+      const ext = (d.ext as Record<string, unknown>) || {};
+      streamMeta.model = (ext.model as string) || "";
+      if (d.thread_id) currentThreadId.value = d.thread_id as string;
       break;
-    case "token":
-      streamingContent.value += (evt.data.content as string) || "";
+    }
+    case "block.started":
+      if (d.block_type === "text") {
+        streamTextBlocks.add(`${d.message_id}:${d.block_index}`);
+      }
       break;
-    case "tool_call_start":
+    case "block.delta":
+      if (streamTextBlocks.has(`${d.message_id}:${d.block_index}`)) {
+        streamingContent.value += (d.delta as string) || "";
+      }
+      break;
+    case "tool.started":
       streamingToolCalls.value.push({
-        tool_call_id: (evt.data.tool_call_id as string) || "",
-        name: (evt.data.name as string) || "",
+        tool_call_id: (d.tool_call_id as string) || "",
+        name: (d.name as string) || "",
         status: "running",
-        arguments: evt.data.arguments as Record<string, unknown> | undefined,
+        arguments: d.arguments as Record<string, unknown> | undefined,
       });
       break;
-    case "tool_call_end": {
-      const id = evt.data.tool_call_id as string;
-      const tc = streamingToolCalls.value.find((t) => t.tool_call_id === id);
+    case "tool.updated": {
+      const tc = streamingToolCalls.value.find(
+        (t) => t.tool_call_id === (d.tool_call_id as string),
+      );
       if (tc) {
-        const evtStatus = (evt.data.status as string) || "";
-        tc.status = evtStatus === "error" ? "error" : evtStatus === "subagent_hitl" ? "subagent_hitl" : "done";
-        tc.result = isSubagentHitlStatus(evtStatus) ? "" : (evt.data.result as string) || "";
+        const st = (d.status as string) || "";
+        tc.status = st === "completed" ? "done" : st === "failed" ? "error" : "running";
+        if (d.result != null) tc.result = (d.result as string) || "";
       }
       break;
     }
-    case "tool_hitl_required":
-      pendingHitl.value = evt.data as unknown as HitlPayload;
+    case "hitl.required":
+      pendingHitl.value = d as unknown as HitlPayload;
+      pendingHitlRunId.value = (d.run_id as string) || null;
       break;
-    case "message_complete":
-      streamMeta.tokenUsage = (evt.data.usage as TokenUsage) ?? null;
+    case "ext.references":
+      // RAG 流式专属:富结构参考文档列表
+      ragReferences.value = (d.items as AppRunReference[]) ?? [];
       break;
-    case "references":
-      // RAG 应用流式专属:富结构的参考文档列表;message_complete.sources 是
-      // 兼容用的简短字符串数组,这里覆盖成完整 card 数据
-      ragReferences.value = (evt.data.items as AppRunReference[]) ?? [];
+    case "run.finished": {
+      const ext = (d.ext as Record<string, unknown>) || {};
+      streamMeta.tokenUsage = (ext.usage as TokenUsage) ?? null;
+      streamMeta.latency_ms = (ext.latency_ms as number) ?? null;
       break;
-    case "done":
-      streamMeta.latency_ms = (evt.data.latency_ms as number) ?? null;
-      break;
-    case "error":
-      message.error((evt.data.message as string) || "执行出错");
+    }
+    case "run.error":
+      message.error((d.message as string) || "执行出错");
       break;
   }
 }
@@ -1178,14 +1194,21 @@ function onHitlRespond(action: HitlAction, parameters?: Record<string, unknown>)
     (t) => t.tool_call_id === pendingHitl.value?.tool_call_id,
   );
   if (tc) tc.status = "done";
+  const parentRunId = pendingHitlRunId.value ?? undefined;
   pendingHitl.value = null;
+  pendingHitlRunId.value = null;
   streamAbort.value = appApi.testAppHitlRespondStream(
     app.value.id,
     hitlId,
     {
       thread_id: currentThreadId.value,
-      action,
-      parameters: action === "modify" ? parameters : undefined,
+      ...(parentRunId ? { parent_run_id: parentRunId } : {}),
+      outcome: {
+        selected: {
+          option_id: action,
+          ...(action === "modify" && parameters ? { parameters } : {}),
+        },
+      },
     },
     {
       onEvent: handleStreamEvent,

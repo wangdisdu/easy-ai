@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelGatewayChatMessage(BaseModel):
@@ -104,6 +104,8 @@ class AgentRunRequest(BaseModel):
     use_checkpoint: bool = False
     # 仅用作 SSE 提示信号：本轮是否走过"checkpoint 缺失 + 业务消息重建"的降级路径
     degraded: bool = False
+    # HITL 续跑时指向被中断的原 run（协议 run.started.parent_run_id），用于审计追溯
+    parent_run_id: str | None = None
 
 
 class RagRunRequest(BaseModel):
@@ -115,7 +117,39 @@ class RagRunRequest(BaseModel):
     variables: dict[str, Any] = Field(default_factory=dict)
 
 
+class HitlSelected(BaseModel):
+    """协议 hitl.required.options 的裁决选择。"""
+
+    option_id: Literal["confirm", "modify", "reject"]
+    parameters: dict[str, Any] | None = None
+
+
+class HitlOutcome(BaseModel):
+    """协议续跑请求体的 outcome：二选一 selected / cancelled。"""
+
+    selected: HitlSelected | None = None
+    cancelled: bool | None = None
+
+    @model_validator(mode="after")
+    def _require_one(self) -> HitlOutcome:
+        if self.selected is None and not self.cancelled:
+            raise ValueError("outcome requires 'selected' or 'cancelled'")
+        return self
+
+    @property
+    def action(self) -> str:
+        """映射到内部 resume 契约（confirm/modify/reject），不改 PolicyMiddleware。"""
+        if self.cancelled:
+            return "reject"
+        return self.selected.option_id if self.selected else "reject"
+
+    @property
+    def resolved_parameters(self) -> dict[str, Any] | None:
+        return self.selected.parameters if self.selected else None
+
+
 class AppTestHitlRespondReq(BaseModel):
     thread_id: str
-    action: str  # "confirm" | "modify" | "reject"
-    parameters: dict[str, Any] | None = None
+    hitl_id: str | None = None
+    outcome: HitlOutcome
+    parent_run_id: str | None = None
