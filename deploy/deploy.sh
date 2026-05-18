@@ -17,8 +17,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PROJECT="easy-ai"
-ENV_FILE=".env"
-COMPOSE_FILE="docker-compose.yml"
+ENV_FILE="${PWD}/.env"
+COMPOSE_FILE="${PWD}/docker-compose.yml"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
     if [[ -f .env.example ]]; then
