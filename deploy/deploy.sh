@@ -2,11 +2,13 @@
 # easy-ai 一键部署脚本
 #
 # 用法:
-#   ./deploy.sh up          # 启动全部服务(首次会构建镜像)
-#   ./deploy.sh down        # 停止并删除容器(保留 volume)
-#   ./deploy.sh restart     # 重启
-#   ./deploy.sh logs [svc]  # 查看日志
-#   ./deploy.sh ps          # 查看状态
+#   ./deploy.sh up               # 启动全部服务(首次会构建镜像)
+#   ./deploy.sh down             # 停止并删除容器(保留 volume)
+#   ./deploy.sh restart          # 重启
+#   ./deploy.sh redeploy         # 删除容器后重建并启动(保留数据 volume)
+#   ./deploy.sh redeploy --volumes  # 同时清空数据 volume(需二次确认)
+#   ./deploy.sh logs [svc]       # 查看日志
+#   ./deploy.sh ps               # 查看状态
 #
 # 首次启动时 Flowise 会自动创建默认 Organization+Workspace+admin 账号
 # (由 easyaiBootstrapDefaults 完成),无需任何手动引导步骤。
@@ -58,6 +60,30 @@ case "${cmd}" in
     restart)
         "${COMPOSE[@]}" restart "$@"
         ;;
+    redeploy)
+        wipe_volumes=false
+        if [[ "${1:-}" == "--volumes" || "${1:-}" == "-v" ]]; then
+            wipe_volumes=true
+            shift
+        fi
+        if [[ "${wipe_volumes}" == true ]]; then
+            echo "[easy-ai] 警告: --volumes 会删除所有数据卷(postgres 等),数据不可恢复!"
+            read -r -p "确认清空数据并重新部署? 输入 yes 继续: " confirm
+            if [[ "${confirm}" != "yes" ]]; then
+                echo "[easy-ai] 已取消。"
+                exit 1
+            fi
+            echo "[easy-ai] 停止并删除容器及数据卷..."
+            "${COMPOSE[@]}" down --volumes
+        else
+            echo "[easy-ai] 停止并删除容器(保留数据卷)..."
+            "${COMPOSE[@]}" down
+        fi
+        echo "[easy-ai] 重新构建并启动..."
+        "${COMPOSE[@]}" up -d --build "$@"
+        echo
+        echo "[easy-ai] 重新部署完成。"
+        ;;
     logs)
         "${COMPOSE[@]}" logs -f "$@"
         ;;
@@ -69,7 +95,7 @@ case "${cmd}" in
         ;;
     *)
         echo "未知命令: ${cmd}" >&2
-        echo "用法: $0 {up|down|restart|logs|ps|config}" >&2
+        echo "用法: $0 {up|down|restart|redeploy|logs|ps|config}" >&2
         exit 1
         ;;
 esac
