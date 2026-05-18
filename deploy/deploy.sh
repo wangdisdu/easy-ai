@@ -48,7 +48,8 @@ case "${cmd}" in
         echo "  - Langfuse:    http://localhost:${langfuse_port:-18030}"
         echo "  - Flowise:     内网,经 easy-ai 反代访问,不直接暴露宿主端口"
         echo "  - RAGFlow API: http://127.0.0.1:18040  (内网,经 easy-ai-backend 调用)"
-        echo "  - RAGFlow UI:  http://127.0.0.1:18044  (仅运维直访)"
+        ragflow_ui_port=$(grep -E '^RAGFLOW_WEB_PORT=' .env | cut -d= -f2)
+        echo "  - RAGFlow UI:  http://localhost:${ragflow_ui_port:-18044}  (已对外开放)"
         echo
         echo "Flowise 默认 Organization+Workspace 会在首次启动时自动创建,无需手动引导。"
         echo "RAGFlow 镜像由 ragflow/ submodule 本地 build (首次约 5-10 分钟)。"

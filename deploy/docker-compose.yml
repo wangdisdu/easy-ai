@@ -6,8 +6,8 @@
 #   3. RAGFlow 应用: ragflow / ragflow-mysql / ragflow-es
 #   4. 基础设施: postgres / redis / clickhouse / minio
 #
-# 宿主机端口统一在 188xx 段;仅 easy-ai-frontend 与 langfuse-web 绑定到
-# 0.0.0.0,其余组件全部绑定 127.0.0.1 仅本机可访问。
+# 宿主机端口统一在 188xx 段;easy-ai-frontend / langfuse-web / ragflow Web UI
+# 绑定到 0.0.0.0 对外开放,其余组件全部绑定 127.0.0.1 仅本机可访问。
 #
 # RAGFlow 复用现网 minio (按 prefix 隔离) 与 redis (用 db=1),
 # 但其结构化数据库使用专用 ragflow-mysql、向量/全文检索使用专用 ragflow-es,
@@ -188,8 +188,8 @@ services:
     ports:
       # 主 HTTP API,easy-ai-backend 调用入口;仅本机调试用
       - "127.0.0.1:18040:9380"
-      # 内置 Web UI(运维直访,平台用户不使用)
-      - "127.0.0.1:18044:80"
+      # 内置 Web UI;绑定 0.0.0.0 对外开放(与 easy-ai-frontend / langfuse-web 同策略)
+      - "${RAGFLOW_WEB_PORT:-18044}:80"
     environment:
       # ── MySQL ──
       MYSQL_HOST: ragflow-mysql

@@ -232,6 +232,12 @@ class RagApp:
         try:
             prep = await asyncio.to_thread(self._prepare_stream, req, req_ctx, request_type)
         except ServiceError as e:
+            logger.warning(
+                "[rag] stream prepare rejected: app_id=%s code=%s msg=%s",
+                req.app_id,
+                e.code,
+                e.msg,
+            )
             yield RunError(run_id=run_id, code=str(e.code), message=e.msg)
             return
         except Exception as e:
