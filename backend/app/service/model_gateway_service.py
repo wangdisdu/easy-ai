@@ -207,41 +207,41 @@ class ModelGatewayService:
                     "POST", f"{base_url}/chat/completions", json=payload, headers=headers
                 ) as resp,
             ):
-                    response_status = resp.status_code
-                    if resp.status_code >= 400:
-                        body = await resp.aread()
-                        error_message = (
-                            f"litellm stream failed status={resp.status_code} "
-                            f"body={self._truncate(body.decode('utf-8', 'replace'))}"
-                        )
-                        yield {"error": error_message}
-                        success = False
-                        return
+                response_status = resp.status_code
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    error_message = (
+                        f"litellm stream failed status={resp.status_code} "
+                        f"body={self._truncate(body.decode('utf-8', 'replace'))}"
+                    )
+                    yield {"error": error_message}
+                    success = False
+                    return
 
-                    async for raw_line in resp.aiter_lines():
-                        if not raw_line:
-                            continue
-                        line = raw_line.strip()
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if not data or data == "[DONE]":
-                            continue
-                        try:
-                            chunk = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        choices = chunk.get("choices")
-                        if isinstance(choices, list) and choices:
-                            delta = choices[0].get("delta") or {}
-                            content = delta.get("content")
-                            if isinstance(content, str) and content:
-                                full_content += content
-                                yield {"delta": content}
-                        # OpenAI / LiteLLM 在最后一个 chunk 给 usage
-                        u = chunk.get("usage")
-                        if isinstance(u, dict):
-                            usage = u
+                async for raw_line in resp.aiter_lines():
+                    if not raw_line:
+                        continue
+                    line = raw_line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = chunk.get("choices")
+                    if isinstance(choices, list) and choices:
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if isinstance(content, str) and content:
+                            full_content += content
+                            yield {"delta": content}
+                    # OpenAI / LiteLLM 在最后一个 chunk 给 usage
+                    u = chunk.get("usage")
+                    if isinstance(u, dict):
+                        usage = u
         except httpx.HTTPError as e:
             success = False
             error_message = f"litellm stream transport error: {e}"

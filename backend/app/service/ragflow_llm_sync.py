@@ -167,9 +167,7 @@ def resync_model_blocking(
             f"(only Embedding/Rerank are supported)"
         )
     try:
-        _delete_llm_blocking(
-            provider_type=provider_type, model_name=model_name, user_id=user_id
-        )
+        _delete_llm_blocking(provider_type=provider_type, model_name=model_name, user_id=user_id)
     except RagflowClientError as e:
         # delete 失败一般是"不存在",add 仍可继续;仅 log
         logger.info("[ragflow-sync] resync pre-delete skipped: %s", e)

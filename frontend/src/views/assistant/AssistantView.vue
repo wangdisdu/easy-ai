@@ -1,94 +1,71 @@
 <template>
   <div class="assistant-page">
-    <!-- 会话侧栏 -->
-    <aside class="conv-sidebar">
-      <div class="conv-sidebar-header">
-        <a-button type="primary" block @click="createNewChat">
-          <template #icon><PlusOutlined /></template>
-          新建对话
+    <!-- 顶栏:应用 → 对话 级联选择器(替代原左侧会话列表) -->
+    <header class="asst-topbar">
+      <div class="asst-picker" @click.stop>
+        <a-button class="app-picker-btn" @click="togglePicker">
+          <span v-if="selectedApp" :class="['conv-type-tag', `conv-type--${selectedApp.app_type}`]">{{ appTypeShort[selectedApp.app_type] || selectedApp.app_type }}</span>
+          <span class="app-picker-name">{{ pickerLabel }}</span>
+          <DownOutlined class="app-picker-arrow" />
         </a-button>
-      </div>
-      <div class="conv-list">
-        <div
-          v-for="conv in conversations"
-          :key="conv.id"
-          :class="['conv-item', currentConversation?.id === conv.id ? 'conv-item--active' : '']"
-          @click="selectConversation(conv)"
-        >
-          <div class="conv-item-head">
-            <span :class="['conv-type-tag', `conv-type--${conv.app_type}`]">{{ appTypeShort[conv.app_type] || conv.app_type }}</span>
-            <span class="conv-app-name">{{ conv.app_name }}</span>
-            <span class="conv-time">{{ formatRelativeTime(conv.update_time) }}</span>
+        <div v-if="showAppPicker" v-click-outside="closePicker" class="cascade-dropdown">
+          <!-- 左:应用 -->
+          <div class="cascade-apps">
+            <div class="picker-section-title">应用</div>
+            <div
+              v-for="a in publishedApps"
+              :key="a.id"
+              :class="['cascade-app', pickerApp?.id === a.id ? 'cascade-app--active' : '']"
+              @click="pickerApp = a"
+            >
+              <span :class="['conv-type-tag', `conv-type--${a.app_type}`]">{{ appTypeShort[a.app_type] || a.app_type }}</span>
+              <span class="cascade-app-name">{{ a.name }}</span>
+            </div>
+            <a-empty v-if="!publishedApps.length" :image="false" description="暂无已发布应用" />
           </div>
-          <div class="conv-title">{{ conv.title || "新对话" }}</div>
-          <div v-if="conv.last_message" class="conv-preview">{{ conv.last_message }}</div>
-          <a-popconfirm
-            title="删除该会话？"
-            description="消息历史和运行态都会被清掉，无法恢复。"
-            ok-text="删除"
-            cancel-text="取消"
-            ok-type="danger"
-            @confirm="deleteConv(conv)"
-          >
-            <DeleteOutlined class="conv-item-delete" :title="'删除会话'" @click.stop />
-          </a-popconfirm>
+          <!-- 右:该应用的会话 + 新建 -->
+          <div class="cascade-convs">
+            <div class="picker-section-title">{{ pickerApp ? pickerApp.name : "← 选择应用" }}</div>
+            <template v-if="pickerApp">
+              <div class="cascade-new" @click="onNewChat(pickerApp)">
+                <PlusOutlined /> 新建对话
+              </div>
+              <div
+                v-for="conv in convsOfPickerApp"
+                :key="conv.id"
+                :class="['conv-item', currentConversation?.id === conv.id ? 'conv-item--active' : '']"
+                @click="onPickConversation(conv)"
+              >
+                <div class="conv-item-head">
+                  <span class="conv-app-name">{{ conv.title || "新对话" }}</span>
+                  <span class="conv-time">{{ formatRelativeTime(conv.update_time) }}</span>
+                </div>
+                <div v-if="conv.last_message" class="conv-preview">{{ conv.last_message }}</div>
+                <a-popconfirm
+                  title="删除该会话？"
+                  description="消息历史和运行态都会被清掉，无法恢复。"
+                  ok-text="删除"
+                  cancel-text="取消"
+                  ok-type="danger"
+                  @confirm="deleteConv(conv)"
+                >
+                  <DeleteOutlined class="conv-item-delete" title="删除会话" @click.stop />
+                </a-popconfirm>
+              </div>
+              <a-empty
+                v-if="!convsOfPickerApp.length"
+                :image="false"
+                description="该应用暂无对话"
+              />
+            </template>
+          </div>
         </div>
-        <a-empty v-if="!conversations.length" :image="false" description="暂无对话" class="conv-empty" />
       </div>
-    </aside>
+      <span class="chat-topbar-hint">多轮对话 · 上下文自动携带</span>
+    </header>
 
-    <!-- 对话主区 -->
-    <main class="chat-main">
+    <div class="asst-body">
       <div class="chat-content">
-      <!-- 顶部栏 -->
-      <div class="chat-topbar">
-        <div class="chat-app-selector" @click.stop>
-          <a-button class="app-picker-btn" @click="togglePicker">
-            <span v-if="selectedApp" :class="['conv-type-tag', `conv-type--${selectedApp.app_type}`]">{{ appTypeShort[selectedApp.app_type] || selectedApp.app_type }}</span>
-            <span class="app-picker-name">{{ selectedApp?.name || "选择应用" }}</span>
-            <DownOutlined class="app-picker-arrow" />
-          </a-button>
-
-          <!-- 两级下拉菜单 -->
-          <div v-if="showAppPicker" v-click-outside="closePicker" class="app-picker-dropdown">
-            <template v-if="!pickerType">
-              <div class="picker-section-title">选择应用类型</div>
-              <div
-                v-for="t in appTypeList"
-                :key="t.id"
-                class="picker-option"
-                @click="pickerType = t.id"
-              >
-                <span class="picker-option-icon">{{ t.icon }}</span>
-                <div class="picker-option-text">
-                  <div class="picker-option-label">{{ t.label }}</div>
-                  <div class="picker-option-desc">{{ t.desc }}</div>
-                </div>
-                <RightOutlined class="picker-option-arrow" />
-              </div>
-            </template>
-            <template v-else>
-              <div class="picker-section-title picker-section-back" @click="pickerType = null">
-                <LeftOutlined /> {{ appTypeList.find((t) => t.id === pickerType)?.label }}
-              </div>
-              <div
-                v-for="a in filteredApps"
-                :key="a.id"
-                :class="['picker-option', selectedApp?.id === a.id ? 'picker-option--active' : '']"
-                @click="selectApp(a)"
-              >
-                <div class="picker-option-text">
-                  <div class="picker-option-label">{{ a.name }}</div>
-                  <div class="picker-option-desc">{{ a.description || "" }}</div>
-                </div>
-                <CheckOutlined v-if="selectedApp?.id === a.id" class="picker-check" />
-              </div>
-              <a-empty v-if="!filteredApps.length" :image="false" description="暂无该类型的已发布应用" />
-            </template>
-          </div>
-        </div>
-        <span class="chat-topbar-hint">多轮对话 · 上下文自动携带</span>
-      </div>
 
       <!-- 消息列表 -->
       <div ref="chatContainer" class="chat-messages" @click="onMessagesClick">
@@ -234,8 +211,52 @@
         <div class="chat-input-hint">Enter 发送 · Shift+Enter 换行 · 内容由 AI 生成，请注意甄别</div>
       </div>
       </div>
-      <TodoPanel v-if="showTodoPanel" :todos="todos" />
-    </main>
+
+      <!-- 右侧固定区:计划 / 沙盒桌面 标签切换 -->
+      <aside class="right-panel">
+        <a-tabs v-model:activeKey="rightTab" size="small" class="right-tabs">
+          <a-tab-pane key="plan" tab="计划">
+            <div class="plan-pane">
+              <div
+                v-for="(t, i) in todos"
+                :key="i"
+                :class="['plan-item', `plan-item--${t.status}`]"
+              >
+                <span class="plan-item-icon">{{ planIcon(t.status) }}</span>
+                <span class="plan-item-text">{{ t.content }}</span>
+              </div>
+              <a-empty
+                v-if="!todos.length"
+                :image="false"
+                description="暂无计划(Agent 执行计划模式时在此展示)"
+                class="plan-empty"
+              />
+            </div>
+          </a-tab-pane>
+          <a-tab-pane v-if="sandboxEnabled" key="sandbox" tab="沙盒">
+            <div class="sandbox-pane">
+              <a-empty
+                v-if="!currentThreadId"
+                :image="false"
+                description="发起一次对话(触发沙盒)后可查看桌面"
+              />
+              <a-spin v-else-if="desktopLoading" tip="正在拉起沙盒桌面…">
+                <div class="sandbox-desktop-frame" />
+              </a-spin>
+              <iframe
+                v-else-if="desktopUrl"
+                :src="desktopUrl"
+                class="sandbox-desktop-frame"
+                allow="clipboard-read; clipboard-write"
+              />
+              <div v-else class="sandbox-retry">
+                <a-button size="small" @click="openDesktop">加载沙盒桌面</a-button>
+              </div>
+            </div>
+          </a-tab-pane>
+        </a-tabs>
+      </aside>
+    </div>
   </div>
 </template>
 
@@ -245,8 +266,6 @@ import {
   PlusOutlined,
   DownOutlined,
   RightOutlined,
-  LeftOutlined,
-  CheckOutlined,
   DeleteOutlined,
 } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
@@ -257,7 +276,8 @@ import * as kbApi from "@/api/kb";
 import { useRouter } from "vue-router";
 import type { AppResp, ConversationResp, ConversationMessageResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
-import TodoPanel, { type Todo } from "@/components/TodoPanel.vue";
+import { getSandboxView } from "@/api/sandboxImage";
+import type { Todo } from "@/components/TodoPanel.vue";
 import HitlConfirmCard, { type HitlPayload } from "@/components/HitlConfirmCard.vue";
 import type { HitlAction } from "@/api/conversation";
 
@@ -347,9 +367,9 @@ import {
   toolDisplayIcon,
 } from "@/composables/useToolDisplay";
 
-// 应用选择器
+// 应用 → 对话 级联选择器
 const showAppPicker = ref(false);
-const pickerType = ref<string | null>(null);
+const pickerApp = ref<AppResp | null>(null);
 
 const appTypeShort: Record<string, string> = {
   llm: "LLM",
@@ -359,24 +379,67 @@ const appTypeShort: Record<string, string> = {
   agent_flow: "Flow",
 };
 
-const appTypeList = [
-  { id: "llm", label: "LLM 应用", desc: "大模型通用应用", icon: "✨" },
-  { id: "rag", label: "RAG 知识库问答", desc: "基于知识库的问答", icon: "📚" },
-  { id: "agent", label: "Agent 智能体", desc: "可调用工具的智能体", icon: "🤖" },
-  { id: "nl2sql", label: "NL2SQL 数据查询", desc: "自然语言查数据", icon: "🗄" },
-];
-
-const filteredApps = computed(() =>
-  pickerType.value
-    ? publishedApps.value.filter((a) => a.app_type === pickerType.value)
-    : [],
+// 选择器右栏:当前 pickerApp 的会话
+const convsOfPickerApp = computed(() =>
+  pickerApp.value ? conversations.value.filter((c) => c.app_id === pickerApp.value!.id) : [],
 );
 
-// Todo 实时面板：仅 agent 应用 + 当前会话有 todos 时显示
+// 顶栏按钮文案:应用名 · 当前对话标题
+const pickerLabel = computed(() => {
+  if (!selectedApp.value) return "选择助手 / 对话";
+  const title = currentConversation.value?.title || "新对话";
+  return `${selectedApp.value.name} · ${title}`;
+});
+
+// 右侧固定区
+const rightTab = ref<"plan" | "sandbox">("plan");
 const todos = ref<Todo[]>([]);
-const showTodoPanel = computed(
-  () => selectedApp.value?.app_type === "agent" && todos.value.length > 0,
-);
+
+// 沙盒可视化:run.started 捕获 thread_id;sandbox 启用看 app_config.runtime_backend
+const currentThreadId = ref<string | null>(null);
+const desktopUrl = ref("");
+const desktopLoading = ref(false);
+const sandboxEnabled = computed(() => {
+  const rb = (selectedApp.value?.app_config as Record<string, unknown> | undefined)
+    ?.runtime_backend;
+  return typeof rb === "string" && rb !== "state";
+});
+
+function planIcon(status: Todo["status"]): string {
+  return status === "completed" ? "✓" : status === "in_progress" ? "▶" : "○";
+}
+
+async function openDesktop() {
+  if (!currentThreadId.value) return;
+  desktopLoading.value = true;
+  desktopUrl.value = "";
+  for (let i = 0; i < 10; i += 1) {
+    try {
+      const { data } = await getSandboxView(currentThreadId.value);
+      if (data.data.ready && data.data.url) {
+        const u = new URL(data.data.url);
+        const prefix = u.pathname.replace(/^\/+|\/+$/g, "");
+        const wsPath = encodeURIComponent(`${prefix}/websockify`);
+        desktopUrl.value =
+          `${u.origin}/${prefix}/vnc.html?autoconnect=true&resize=scale&path=${wsPath}`;
+        desktopLoading.value = false;
+        return;
+      }
+    } catch {
+      /* 重试 */
+    }
+    if (rightTab.value !== "sandbox") return; // 用户已切走
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  desktopLoading.value = false;
+}
+
+// 切到沙盒标签且已有 thread 且未加载 → 拉起
+watch(rightTab, (t) => {
+  if (t === "sandbox" && currentThreadId.value && !desktopUrl.value && !desktopLoading.value) {
+    openDesktop();
+  }
+});
 
 // write_todos 一轮内可能多次刷，用 RAF 合并到下一帧避免抖动
 let pendingTodos: Todo[] | null = null;
@@ -535,10 +598,18 @@ async function loadApps() {
   publishedApps.value = data.data ?? [];
 }
 
+// 切会话/换沙盒会话:清掉旧沙盒可视化态(thread 不同 = 不同沙盒)
+function resetSandboxView() {
+  currentThreadId.value = null;
+  desktopUrl.value = "";
+  desktopLoading.value = false;
+}
+
 async function selectConversation(conv: ConversationResp) {
   currentConversation.value = conv;
   // 切会话清空 todos：发消息时由 SSE 初始快照恢复（若 checkpoint 有）
   todos.value = [];
+  resetSandboxView();
   // 切会话也丢弃旧的 HITL 暂停（resume 必须配同一会话）
   pendingHitl.value = null;
   hitlBusy.value = false;
@@ -553,17 +624,31 @@ async function selectConversation(conv: ConversationResp) {
   scrollToBottom();
 }
 
-async function createNewChat() {
-  if (!selectedApp.value) {
+async function createNewChat(app?: AppResp) {
+  const target = app ?? selectedApp.value;
+  if (!target) {
     message.warning("请先选择一个应用");
     return;
   }
-  const { data } = await convApi.createConversation({ app_id: selectedApp.value.id });
+  selectedApp.value = target;
+  const { data } = await convApi.createConversation({ app_id: target.id });
   const conv = data.data;
   conversations.value.unshift(conv);
   currentConversation.value = conv;
   messages.value = [];
   todos.value = [];
+  resetSandboxView();
+}
+
+// 级联选择器:左选应用只切 pickerApp(不切上下文);右选会话/新建才切
+function onPickConversation(conv: ConversationResp) {
+  showAppPicker.value = false;
+  selectConversation(conv);
+}
+
+async function onNewChat(app: AppResp) {
+  showAppPicker.value = false;
+  await createNewChat(app);
 }
 
 async function deleteConv(conv: ConversationResp) {
@@ -582,28 +667,14 @@ async function deleteConv(conv: ConversationResp) {
   }
 }
 
-async function selectApp(app: AppResp) {
-  selectedApp.value = app;
-  showAppPicker.value = false;
-  pickerType.value = null;
-
-  // 查找该 app 最近的会话
-  const existing = conversations.value.find((c) => c.app_id === app.id);
-  if (existing) {
-    await selectConversation(existing);
-  } else {
-    await createNewChat();
-  }
-}
-
 function togglePicker() {
   showAppPicker.value = !showAppPicker.value;
-  pickerType.value = null;
+  // 打开时默认定位到当前应用,方便直接看其会话
+  if (showAppPicker.value) pickerApp.value = selectedApp.value;
 }
 
 function closePicker() {
   showAppPicker.value = false;
-  pickerType.value = null;
 }
 
 // ── 消息发送 ──
@@ -662,6 +733,7 @@ function buildStreamHandlers() {
         case "run.started": {
           const ext = (d.ext as Record<string, unknown>) || {};
           if (!streamMeta.model) streamMeta.model = (ext.model as string) || "";
+          if (d.thread_id) currentThreadId.value = d.thread_id as string;
           if (ext.degraded) {
             message.warning(
               "历史已降级恢复：消息保留，但 agent 的待办、虚拟工作文件、工具中间态丢失",
@@ -843,9 +915,220 @@ onMounted(async () => {
 <style scoped>
 .assistant-page {
   display: flex;
-  height: 100%;
-  margin: -24px;
+  flex-direction: column;
+  /* 视口定高:外层 .app-layout-main 是 min-height:100vh(非定高),height:100%
+     resolve 不出会塌成内容高度。高度 = 视口 - 头部;四周 -content-pad 负边距
+     抵消内容区 padding、把可视区顶满(不要再额外减 padding,否则底部空一截)。
+     整条 flex 链由此有真实可分配高度:顶栏固定、消息区滚动、输入区/右侧不随滚。 */
+  height: calc(100vh - var(--header-height, 56px));
+  margin: calc(-1 * var(--content-pad, 24px));
   overflow: hidden;
+}
+
+/* 顶栏:级联选择器 */
+.asst-topbar {
+  height: 48px;
+  flex-shrink: 0;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* 自建层叠上下文并整体浮在 body 之上,避免下拉被对话区/iframe 盖住 */
+  position: relative;
+  z-index: 100;
+}
+
+.asst-picker {
+  position: relative;
+}
+
+.cascade-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 100;
+  display: flex;
+  width: 560px;
+  max-height: 60vh;
+  /* 用与原 picker 一致的不透明悬浮层 token,否则聊天内容会透出来 */
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-elevated);
+  overflow: hidden;
+}
+
+.cascade-apps {
+  width: 200px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.cascade-convs {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.cascade-app {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.cascade-app:hover {
+  background: var(--color-border);
+}
+
+.cascade-app--active {
+  background: var(--color-info-bg);
+}
+
+.cascade-app-name {
+  font-size: 13px;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cascade-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  margin: 6px 0 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-accent);
+  border: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition: filter 0.15s, transform 0.05s;
+}
+
+.cascade-new:hover {
+  filter: brightness(1.08);
+}
+
+.cascade-new:active {
+  transform: translateY(1px);
+}
+
+.cascade-new :deep(.anticon) {
+  font-size: 12px;
+}
+
+/* body:对话 + 右侧固定区 */
+.asst-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  /* 显式压在顶栏之下,无论内部(消息/iframe)是否自建层叠上下文 */
+  position: relative;
+  z-index: 0;
+}
+
+/* 右侧固定区 */
+.right-panel {
+  width: 480px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border);
+  background: var(--surface-muted);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.right-tabs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.right-tabs :deep(.ant-tabs-nav) {
+  margin: 0;
+  padding: 4px 12px 0;
+}
+
+.right-tabs :deep(.ant-tabs-content),
+.right-tabs :deep(.ant-tabs-tabpane) {
+  height: 100%;
+}
+
+.right-tabs :deep(.ant-tabs-content-holder) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.plan-pane {
+  height: 100%;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.plan-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.plan-item-icon {
+  flex-shrink: 0;
+}
+
+.plan-item--completed {
+  color: var(--color-text-tertiary);
+  text-decoration: line-through;
+}
+
+.plan-item--in_progress {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.plan-item--pending {
+  color: var(--color-text-secondary);
+}
+
+.plan-empty {
+  margin-top: 48px;
+}
+
+.sandbox-pane {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.sandbox-desktop-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 480px;
+  border: 0;
+  background: #1e1e1e;
+  display: block;
+}
+
+.sandbox-retry {
+  text-align: center;
 }
 
 /* ── 会话侧栏 ── */
@@ -984,6 +1267,9 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* 关键:flex item 默认 min-height:auto 不收缩,会被消息撑高把整页顶出
+     滚动条;置 0 让内部 .chat-messages 的 overflow 真正生效 */
+  min-height: 0;
 }
 
 /* 顶部栏 */
@@ -1107,6 +1393,7 @@ onMounted(async () => {
 /* 消息列表 */
 .chat-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 20px 24px;
   display: flex;

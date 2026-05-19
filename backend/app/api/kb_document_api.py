@@ -21,7 +21,12 @@ from app.core.request_context import RequestContext, build_request_context
 from app.core.response import PagedResp, Resp
 from app.core.snowflake import SnowflakeGenerator
 from app.db.session import get_db
-from app.model.kb_model import KbChunkResp, KbDocumentPageReq, KbDocumentResp
+from app.model.kb_model import (
+    KbChunkResp,
+    KbDocumentMoveReq,
+    KbDocumentPageReq,
+    KbDocumentResp,
+)
 from app.service.kb_document_service import KbDocumentService
 
 router = APIRouter(prefix="/kb", tags=["kb"])
@@ -51,6 +56,8 @@ def page_documents(
     page_size: int = Query(default=20, ge=1, le=10000),
     keyword: str | None = Query(default=None),
     category: str | None = Query(default=None),
+    category_id: str | None = Query(default=None, description='分类id; "0"=未分类'),
+    recursive: bool = Query(default=False, description="True 时含子树文档"),
     parse_status: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> PagedResp[KbDocumentResp]:
@@ -62,6 +69,8 @@ def page_documents(
             page_size=page_size,
             keyword=keyword,
             category=category,
+            category_id=category_id,
+            recursive=recursive,
             parse_status=parse_status,
         ),
     )
@@ -72,7 +81,7 @@ def page_documents(
 async def upload_documents(
     kb_id: str,
     files: list[UploadFile] = File(...),
-    category: str | None = Form(default=None),
+    category_id: str = Form(default="0"),
     db: Session = Depends(get_db),
     req_ctx: RequestContext = Depends(build_request_context),
 ) -> Resp[list[KbDocumentResp]]:
@@ -84,7 +93,11 @@ async def upload_documents(
         blobs.append((f.filename, content))
     return Resp(
         data=service.upload_documents(
-            db=db, kb_id=int(kb_id), files=blobs, category=category, req_ctx=req_ctx
+            db=db,
+            kb_id=int(kb_id),
+            files=blobs,
+            category_id=int(category_id or 0),
+            req_ctx=req_ctx,
         )
     )
 
@@ -167,6 +180,25 @@ def reparse_document(
         db=db, kb_id=int(kb_id), doc_ids=[int(doc_id)], req_ctx=req_ctx
     )
     return Resp(data=count > 0)
+
+
+@router.put("/{kb_id}/document/move", response_model=Resp[int])
+def move_documents(
+    kb_id: str,
+    body: KbDocumentMoveReq = Body(...),
+    db: Session = Depends(get_db),
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> Resp[int]:
+    """批量把文档移动到目标分类(``category_id="0"`` = 未分类)。
+    纯本地操作, 不触达 RAGFlow。"""
+    count = service.move_documents(
+        db=db,
+        kb_id=int(kb_id),
+        doc_ids=[int(x) for x in body.ids],
+        category_id=int(body.category_id or 0),
+        req_ctx=req_ctx,
+    )
+    return Resp(data=count)
 
 
 @router.delete("/{kb_id}/document", response_model=Resp[int])

@@ -46,6 +46,10 @@ services:
       RAGFLOW_BASE_URL: http://ragflow:9380
       RAGFLOW_SHARED_SECRET: ${RAGFLOW_SHARED_SECRET}
       RAGFLOW_TIMEOUT_SEC: ${RAGFLOW_TIMEOUT_SEC:-30}
+      # 沙盒后端(OpenSandbox)。默认关闭;启用需 docker compose --profile sandbox。
+      SANDBOX_ENABLED: ${SANDBOX_ENABLED:-false}
+      SANDBOX_SERVER_URL: ${SANDBOX_SERVER_URL:-http://opensandbox-server:8090}
+      SANDBOX_API_KEY: ${SANDBOX_API_KEY:-}
     volumes:
       - easy-ai-data:/srv/easy-ai-backend/data
     depends_on:
@@ -373,6 +377,69 @@ services:
       interval: 3s
       timeout: 10s
       retries: 10
+
+  # ============================================================
+  # OpenSandbox 隔离执行(可选,profile=sandbox 才启动)
+  # docker-out-of-docker:挂宿主 docker.sock,在宿主 Docker 上拉 sandbox 容器。
+  # 详见 docs/sandbox-design.md §7。
+  # ============================================================
+  opensandbox-server:
+    image: opensandbox/server:latest
+    container_name: easy-ai-opensandbox
+    restart: unless-stopped
+    profiles: ["sandbox"]
+    ports:
+      # 暴露给宿主,便于端到端验证;backend 走 compose 网络 service 名访问。
+      - "${SANDBOX_SERVER_PORT:-8090}:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./opensandbox/config.template.toml:/etc/opensandbox/config.template.toml:ro
+    networks:
+      # default:与 backend 同网,backend 按 service 名访问 server。
+      - default
+      # easy-ai-sandbox:server 与它经 docker.sock 拉起的 sandbox 容器同网,
+      # 否则 server 在 compose 网、sandbox 在宿主 bridge,server 连不到 sandbox。
+      - easy-ai-sandbox
+    environment:
+      # 启动时根据 SANDBOX_API_KEY 决定鉴权:有值=替换 + 强制鉴权;无值=删除 api_key 行 + 走 insecure。
+      SANDBOX_API_KEY: "${SANDBOX_API_KEY:-}"
+      OPENSANDBOX_INSECURE_SERVER: "${SANDBOX_INSECURE:-YES}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -n "$$SANDBOX_API_KEY" ]; then
+          sed "s|__API_KEY_PLACEHOLDER__|$$SANDBOX_API_KEY|" /etc/opensandbox/config.template.toml > /tmp/config.toml
+          echo "[opensandbox] api_key configured, auth enforced"
+        else
+          sed '/__API_KEY_PLACEHOLDER__/d' /etc/opensandbox/config.template.toml > /tmp/config.toml
+          echo "[opensandbox] no api_key, running insecure (set SANDBOX_API_KEY in .env for production)"
+        fi
+        exec opensandbox-server --config /tmp/config.toml
+    healthcheck:
+      # 镜像内无 curl,用自带 python3 探活。
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # 可视化桌面镜像构建服务:`docker compose --profile sandbox build sandbox-desktop`
+  # 会构建并打 tag 为 easy-ai/sandbox-desktop:latest;up 时只跑 `true` 立即退出,
+  # 真正用它的是 opensandbox-server 经 docker.sock 在宿主 docker 拉沙盒容器。
+  # 详见 docs/sandbox-design.md §9.4 / §9.5。
+  sandbox-desktop:
+    image: easy-ai/sandbox-desktop:latest
+    build:
+      context: ./opensandbox/desktop
+    container_name: easy-ai-sandbox-desktop-builder
+    profiles: ["sandbox"]
+    command: ["true"]
+    restart: "no"
+
+networks:
+  # 固定名(不带 compose project 前缀):OpenSandbox config.toml 的
+  # [docker] network_mode 要按这个名字把 sandbox 容器接进来。
+  easy-ai-sandbox:
+    name: easy-ai-sandbox
 
 volumes:
   easy-ai-data:

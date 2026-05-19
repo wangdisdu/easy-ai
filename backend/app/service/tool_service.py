@@ -22,7 +22,10 @@ from app.model.tool_model import (
     ToolUpdateReq,
 )
 
+# 用户可创建的工具来源。'builtin' 不在内:它是 deepagents 框架内置工具
+# (execute / write_file / edit_file)的治理记录,只由迁移种入、不走 CRUD。
 VALID_SOURCES = {"mcp", "api"}
+BUILTIN_SOURCE = "builtin"
 VALID_RISK_LEVELS = {"low", "medium", "high"}
 VALID_TRANSPORTS = {"sse", "streamable_http"}
 VALID_TOOL_STATUSES = {"enabled", "disabled"}
@@ -32,6 +35,7 @@ VALID_TOOL_STATUSES = {"enabled", "disabled"}
 BUILTIN_TOOLS: list[BuiltinToolResp] = [
     BuiltinToolResp(
         tool_name="ls",
+        group="文件",
         description="列出指定目录下的文件和子目录",
         parameters={
             "type": "object",
@@ -52,6 +56,7 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="glob",
+        group="文件",
         description="按 glob 模式匹配文件路径",
         parameters={
             "type": "object",
@@ -70,6 +75,7 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="grep",
+        group="文件",
         description="在文件内容中搜索匹配指定正则表达式的行",
         parameters={
             "type": "object",
@@ -94,6 +100,7 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="read_file",
+        group="文件",
         description="读取指定文件的内容",
         parameters={
             "type": "object",
@@ -115,6 +122,7 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="edit_file",
+        group="文件",
         description="对已有文件进行局部文本替换",
         parameters={
             "type": "object",
@@ -136,6 +144,7 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="write_file",
+        group="文件",
         description="创建新文件或完整覆盖写入已有文件",
         parameters={
             "type": "object",
@@ -150,7 +159,24 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
         },
     ),
     BuiltinToolResp(
+        tool_name="execute",
+        group="沙盒",
+        description="在隔离沙盒内执行 shell 命令(仅沙盒后端可用;高危,默认走 HITL 人工确认)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "要执行的 shell 命令"},
+                "timeout": {
+                    "type": "integer",
+                    "description": "单条命令最长执行秒数,缺省按 mcp_tool_timeout_seconds(300)",
+                },
+            },
+            "required": ["command"],
+        },
+    ),
+    BuiltinToolResp(
         tool_name="remember",
+        group="记忆",
         description="记下一条关于当前用户的长期事实或偏好，下次对话仍可读取（scope=user，仅限当前用户）",
         parameters={
             "type": "object",
@@ -169,6 +195,7 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="forget",
+        group="记忆",
         description="删除一条之前记下的用户记忆（scope=user，仅限当前用户）",
         parameters={
             "type": "object",
@@ -180,8 +207,114 @@ BUILTIN_TOOLS: list[BuiltinToolResp] = [
     ),
     BuiltinToolResp(
         tool_name="list_my_memories",
+        group="记忆",
         description="查看当前用户已记下的全部长期记忆（key:value 列表）",
         parameters={"type": "object", "properties": {}, "required": []},
+    ),
+    # ── computer-use 桌面操控(仅可视化沙盒 + 应用勾选「允许 Agent 操控桌面」可用)──
+    BuiltinToolResp(
+        tool_name="screenshot",
+        group="桌面操控",
+        description="截取沙盒桌面当前画面并返回图片(多模态,需视觉模型);写类操作前先调一次看清界面",
+        parameters={"type": "object", "properties": {}, "required": []},
+    ),
+    BuiltinToolResp(
+        tool_name="click",
+        group="桌面操控",
+        description="在桌面坐标 (x,y) 单击左键(高危,默认走 HITL)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "屏幕 X(0=左,1280 屏宽)"},
+                "y": {"type": "integer", "description": "屏幕 Y(0=上,800 屏高)"},
+            },
+            "required": ["x", "y"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="double_click",
+        group="桌面操控",
+        description="在 (x,y) 双击左键(打开图标/选中词,高危,默认 HITL)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "屏幕 X"},
+                "y": {"type": "integer", "description": "屏幕 Y"},
+            },
+            "required": ["x", "y"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="right_click",
+        group="桌面操控",
+        description="在 (x,y) 单击右键(呼出上下文菜单,高危,默认 HITL)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "屏幕 X"},
+                "y": {"type": "integer", "description": "屏幕 Y"},
+            },
+            "required": ["x", "y"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="move_mouse",
+        group="桌面操控",
+        description="把鼠标移到 (x,y),不点击(只读 hover,低风险)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "屏幕 X"},
+                "y": {"type": "integer", "description": "屏幕 Y"},
+            },
+            "required": ["x", "y"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="scroll",
+        group="桌面操控",
+        description="在 (x,y) 滚动(高危,默认 HITL)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "x": {"type": "integer", "description": "屏幕 X"},
+                "y": {"type": "integer", "description": "屏幕 Y"},
+                "direction": {
+                    "type": "string",
+                    "enum": ["up", "down"],
+                    "description": "滚动方向",
+                },
+                "amount": {"type": "integer", "description": "滚动次数 1-20"},
+            },
+            "required": ["x", "y"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="type_text",
+        group="桌面操控",
+        description="在当前焦点处输入文本(先 click 聚焦目标输入框;ASCII+CJK 均可,高危,默认 HITL)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要输入的文本(≤2000 字符)"},
+            },
+            "required": ["text"],
+        },
+    ),
+    BuiltinToolResp(
+        tool_name="press_key",
+        group="桌面操控",
+        description="按键或组合键(如 Return、Escape、ctrl+c、alt+Tab;高危,默认 HITL)",
+        parameters={
+            "type": "object",
+            "properties": {
+                "keys": {
+                    "type": "string",
+                    "description": "xdotool keysym;白名单只允许字母数字 + 和 _",
+                },
+            },
+            "required": ["keys"],
+        },
     ),
 ]
 

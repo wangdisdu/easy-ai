@@ -263,17 +263,14 @@ class RagflowClient:
         try:
             resp = self._client.get(url, headers=headers)
         except httpx.TimeoutException as e:
-            raise RagflowClientError(
-                f"ragflow timeout: download {dataset_id}/{document_id}"
-            ) from e
+            raise RagflowClientError(f"ragflow timeout: download {dataset_id}/{document_id}") from e
         except httpx.HTTPError as e:
             raise RagflowClientError(
                 f"ragflow unreachable: download {dataset_id}/{document_id}: {e}"
             ) from e
         if resp.status_code == 401:
             raise RagflowAuthError(
-                f"ragflow auth failed (download {dataset_id}/{document_id}): "
-                f"{resp.text[:200]}"
+                f"ragflow auth failed (download {dataset_id}/{document_id}): " f"{resp.text[:200]}"
             )
         if resp.status_code >= 400:
             raise RagflowClientError(

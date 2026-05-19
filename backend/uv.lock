@@ -572,6 +572,7 @@ dependencies = [
     { name = "langgraph-prebuilt" },
     { name = "litellm" },
     { name = "mcp" },
+    { name = "opensandbox" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "pydantic" },
@@ -606,6 +607,7 @@ requires-dist = [
     { name = "langgraph-prebuilt", specifier = "==1.0.9" },
     { name = "litellm", specifier = "==1.83.0" },
     { name = "mcp", specifier = "==1.27.0" },
+    { name = "opensandbox", specifier = "==0.1.9" },
     { name = "psycopg", extras = ["binary"], specifier = "==3.2.3" },
     { name = "psycopg-pool", specifier = "==3.3.0" },
     { name = "pydantic", specifier = "==2.12.5" },
@@ -1644,6 +1646,21 @@ wheels = [
 ]
 
 [[package]]
+name = "opensandbox"
+version = "0.1.9"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/5a/2a/ab3cc141e041f71a373c97fcda8749dba9328f1b9bf80401378c0611556f/opensandbox-0.1.9.tar.gz", hash = "sha256:670fbf292c498f8467963d21e91ade9ea8b8f63f4ef18d18fff9581e0952ec03", size = 160034 }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4e/9b/553f8d7a30eddb12785711b2a1c682386878e2bb95450acd806f9fa62930/opensandbox-0.1.9-py3-none-any.whl", hash = "sha256:17faed35b60a982fee5a643fed8e4e12f041e5432d5ea0665d2828d1f2082759", size = 360945 },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.40.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -2177,6 +2194,18 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/05/35/30e0d83068951d90a01852cb1cef56e5d8a09d20c7f511634cc2f7e0372a/pytest-8.3.4.tar.gz", hash = "sha256:965370d062bce11e73868e0335abac31b4d3de0e82f4007408d242b4f8610761", size = 1445919 }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/11/92/76a1c94d3afee238333bc0a42b82935dd8f9cf8ce9e336ff87ee14d9e1cf/pytest-8.3.4-py3-none-any.whl", hash = "sha256:50e16d954148559c9a74109af1eaf0c945ba2d8f30f0a3d3335edde19788b6f6", size = 343083 },
+]
+
+[[package]]
+name = "python-dateutil"
+version = "2.9.0.post0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432 }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892 },
 ]
 
 [[package]]

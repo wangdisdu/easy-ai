@@ -18,9 +18,7 @@ class PermissionOption(BaseModel):
 def list_permission_options() -> Resp[list[PermissionOption]]:
     return Resp(
         data=[
-            PermissionOption(
-                code=p.code, label=p.label, group=p.group, description=p.description
-            )
+            PermissionOption(code=p.code, label=p.label, group=p.group, description=p.description)
             for p in PERMISSION_DEFS
         ]
     )

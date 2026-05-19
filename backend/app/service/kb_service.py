@@ -226,9 +226,7 @@ class KbService:
 
     # ── 内部工具 ──────────────────────────────────────────────────────
 
-    def _aggregate_stats(
-        self, db: Session, kb_ids: list[int]
-    ) -> dict[int, tuple[int, int]]:
+    def _aggregate_stats(self, db: Session, kb_ids: list[int]) -> dict[int, tuple[int, int]]:
         """批量算 (doc_count, chunk_count): 一次 GROUP BY 即可,空集合直接跳。"""
         if not kb_ids:
             return {}

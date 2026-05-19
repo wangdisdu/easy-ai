@@ -221,6 +221,7 @@ export interface BuiltinToolResp {
   tool_name: string;
   description: string;
   parameters: Record<string, unknown>;
+  group?: string;
 }
 
 export interface McpServerResp {
@@ -426,7 +427,11 @@ export interface KbDocumentResp {
   name: string;
   format: string;
   size_bytes?: number | null;
+  // 旧字符串分类(只读, 下迭代删)
   category?: string | null;
+  // 树形分类: "0"=未分类; category_name 后端 join 回填
+  category_id: string;
+  category_name?: string | null;
   source_type: string;
   source_meta?: Record<string, unknown> | null;
   ragflow_doc_id?: string | null;
@@ -441,6 +446,24 @@ export interface KbDocumentResp {
   create_user?: string | null;
   create_time: number;
   update_time: number;
+}
+
+export interface KbCategoryNode {
+  id: string;
+  kb_id: string;
+  name: string;
+  parent_id: string;
+  level: number;
+  sort: number;
+  // 直挂该节点(不含子树)的文档数
+  doc_count: number;
+  children: KbCategoryNode[];
+}
+
+export interface KbCategoryDeletePreview {
+  deleted: boolean;
+  category_count: number;
+  document_count: number;
 }
 
 export interface KbChunkResp {
@@ -463,4 +486,32 @@ export interface KbRetrieveHit {
 export interface KbRetrieveResp {
   hits: KbRetrieveHit[];
   total: number;
+}
+
+export interface SandboxViewResp {
+  ready: boolean;
+  url?: string | null;
+  headers?: Record<string, string>;
+}
+
+export interface SandboxInstanceResp {
+  id: string;
+  status: string;
+  image?: string | null;
+  created_at?: string | null;
+  expires_at?: string | null;
+  metadata?: Record<string, string>;
+}
+
+export interface SandboxImageResp {
+  id: string;
+  name: string;
+  image: string;
+  description?: string | null;
+  cpu?: string | null;
+  memory?: string | null;
+  is_default: boolean;
+  enabled: boolean;
+  create_time: number;
+  update_time: number;
 }

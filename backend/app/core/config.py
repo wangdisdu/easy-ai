@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     # HITL 超时扫描频率
     hitl_timeout_check_interval_seconds: int = Field(default=30)
 
+    # OpenSandbox 隔离执行后端（详见 docs/sandbox-design.md §7）
+    # app_config.runtime_backend=opensandbox/composite 时生效；默认 state 不需要。
+    sandbox_enabled: bool = Field(default=False)
+    sandbox_server_url: str = Field(default="http://127.0.0.1:8910")
+    sandbox_api_key: str | None = Field(default=None)
+    sandbox_default_execute_timeout: int = Field(default=300)
+    sandbox_warm_pool_size: int = Field(default=0)
+
     # Flowise 嵌入接入（M1）
     flowise_enabled: bool = Field(default=False)
     flowise_internal_url: str = Field(default="http://127.0.0.1:3001")

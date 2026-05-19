@@ -14,6 +14,7 @@ from app.app.app_runtime import AppRuntime
 from app.app.checkpointer_factory import get_checkpointer_factory
 from app.app.llm_app import LlmApp
 from app.app.rag_app import RagApp
+from app.core.config import settings
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
@@ -281,6 +282,16 @@ class ConversationService:
     async def _delete_checkpoint_thread(self, thread_id: str) -> None:
         saver = get_checkpointer_factory().get()
         await saver.adelete_thread(thread_id)
+        # 沙盒寿命 = checkpoint 寿命:thread 的 checkpoint 被回收(TTL purge /
+        # 被遗忘权 / 手动删除均汇聚到这里)时,联动 kill 对应沙盒,避免泄漏。
+        # 详见 docs/sandbox-design.md §4.2。未启用沙盒时 registry 为空 no-op。
+        if settings.sandbox_enabled:
+            try:
+                from app.app.sandbox import get_sandbox_registry
+
+                get_sandbox_registry().purge_hook(thread_id)
+            except Exception:
+                logger.exception("purge: sandbox reclaim failed for thread %s", thread_id)
 
     def list_messages(
         self, db: Session, conversation_id: int, user_id: int

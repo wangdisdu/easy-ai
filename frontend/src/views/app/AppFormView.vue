@@ -334,6 +334,56 @@
           <a-form-item label="System Prompt">
             <a-textarea v-model:value="agentConfig.system_prompt" :rows="8" />
           </a-form-item>
+          <a-form-item label="启用沙盒">
+            <a-switch v-model:checked="sandboxEnabled" />
+            <p class="sandbox-hint">
+              开启后 Agent 的 execute/写文件等工具在隔离容器内运行,并按工具治理走人工确认;关闭则在状态内存中模拟。
+            </p>
+          </a-form-item>
+          <a-form-item v-if="sandboxEnabled" label="选择沙盒" required>
+            <a-alert
+              v-if="!sandboxImages.length"
+              type="warning"
+              show-icon
+              message="暂无可用沙盒镜像"
+              description="请先在 系统配置 → 沙盒管理 中新建并启用镜像,再开启沙盒。"
+            />
+            <a-radio-group
+              v-else
+              v-model:value="agentConfig.sandbox_image_id"
+              class="sandbox-picker"
+            >
+              <a-radio
+                v-for="img in sandboxImages"
+                :key="img.id"
+                :value="img.id"
+                class="sandbox-card"
+              >
+                <div class="sandbox-card-body">
+                  <div class="sandbox-card-head">
+                    <span class="sandbox-card-name">{{ img.name }}</span>
+                    <a-tag v-if="img.is_default" color="blue">默认</a-tag>
+                    <a-tag v-if="img.cpu || img.memory">
+                      {{ [img.cpu ? `${img.cpu} CPU` : "", img.memory].filter(Boolean).join(" / ") }}
+                    </a-tag>
+                  </div>
+                  <code class="sandbox-card-image">{{ img.image }}</code>
+                  <div v-if="img.description" class="sandbox-card-desc">
+                    {{ img.description }}
+                  </div>
+                </div>
+              </a-radio>
+            </a-radio-group>
+          </a-form-item>
+          <a-form-item v-if="sandboxEnabled" label="Agent 操控桌面">
+            <a-checkbox v-model:checked="agentConfig.computer_use">
+              允许 Agent 看截图并点按/输入(computer-use)
+            </a-checkbox>
+            <p class="sandbox-hint">
+              需选用带桌面的可视化镜像;开启后 Agent 获得 screenshot/click/type 等工具,
+              点按/输入等改动类操作按工具治理走人工确认。
+            </p>
+          </a-form-item>
           <a-row :gutter="16">
             <a-col :xs="24" :md="12">
               <a-form-item label="绑定工具">
@@ -457,9 +507,10 @@ import * as appApi from "@/api/app";
 import * as categoryApi from "@/api/appCategory";
 import * as kbApi from "@/api/kb";
 import * as llmApi from "@/api/llm";
+import * as sandboxApi from "@/api/sandboxImage";
 import * as skillApi from "@/api/skill";
 import * as toolApi from "@/api/tool";
-import type { AppResp, LlmProviderResp } from "@/api/types";
+import type { AppResp, LlmProviderResp, SandboxImageResp } from "@/api/types";
 
 type InputVarType = "text" | "textarea" | "number" | "select" | "file";
 type OutputFormat = "text" | "json" | "markdown";
@@ -490,6 +541,7 @@ const providerList = ref<LlmProviderResp[]>([]);
 const toolOptions = ref<Array<{ label: string; value: string }>>([]);
 const skillOptions = ref<Array<{ label: string; value: string }>>([]);
 const categoryOptions = ref<Array<{ label: string; value: string }>>([]);
+const sandboxImages = ref<SandboxImageResp[]>([]);
 
 const appTypeLabel: Record<AppType, string> = {
   llm: "LLM 应用",
@@ -635,7 +687,28 @@ const agentConfig = reactive({
   max_turns: 20,
   agent_timeout: 60,
   allow_auto_exec: false,
+  // 运行时后端:state=无沙盒(默认);opensandbox=隔离沙盒;composite=混合
+  runtime_backend: "state",
+  // 选用的沙盒镜像 id(仅 runtime_backend 非 state 时生效)
+  sandbox_image_id: "",
+  // 允许 Agent 操控桌面(computer-use,Tier 3);需桌面镜像
+  computer_use: false,
   sub_agents: [] as Array<{ name: string; model: string; role: string }>,
+});
+
+// 「启用沙盒」开关映射到 runtime_backend:关=state,开=opensandbox
+// (历史 composite 配置保留,不被开关误改);关闭时清空已选镜像。
+const sandboxEnabled = computed<boolean>({
+  get: () => agentConfig.runtime_backend !== "state",
+  set: (v: boolean) => {
+    if (v) {
+      agentConfig.runtime_backend =
+        agentConfig.runtime_backend === "composite" ? "composite" : "opensandbox";
+    } else {
+      agentConfig.runtime_backend = "state";
+      agentConfig.sandbox_image_id = "";
+    }
+  },
 });
 
 // agent 应用绑定的工具/技能 ID，作为顶层字段独立提交，不再通过 app_config
@@ -713,8 +786,18 @@ function buildAppConfig() {
       return { ...ragConfig };
     case "nl2sql":
       return { ...nl2sqlConfig };
-    case "agent":
-      return { ...agentConfig };
+    case "agent": {
+      const { runtime_backend, sandbox_image_id, computer_use, ...rest } = agentConfig;
+      const out: Record<string, unknown> = { ...rest, runtime_backend };
+      // 非 state 后端才下发 sandbox.*;image_id 为空表示用默认镜像(后端解析)
+      if (runtime_backend !== "state") {
+        const sb: Record<string, unknown> = {};
+        if (sandbox_image_id) sb.image_id = sandbox_image_id;
+        if (computer_use) sb.computer_use = true;
+        if (Object.keys(sb).length) out.sandbox = sb;
+      }
+      return out;
+    }
     case "agent_flow":
       // agent_flow 的画布配置由 Flowise 管理,easy-ai 不维护任何编排元数据
       return {};
@@ -776,11 +859,16 @@ function fillFromApp(app: AppResp) {
     });
   }
   if (app.app_type === "agent") {
+    const sandboxCfg =
+      (config.sandbox as { image_id?: string; computer_use?: boolean } | undefined) || {};
     Object.assign(agentConfig, {
       system_prompt: config.system_prompt ?? "",
       max_turns: config.max_turns ?? 20,
       agent_timeout: config.agent_timeout ?? 60,
       allow_auto_exec: !!config.allow_auto_exec,
+      runtime_backend: (config.runtime_backend as string) ?? "state",
+      sandbox_image_id: sandboxCfg.image_id ?? "",
+      computer_use: !!sandboxCfg.computer_use,
       sub_agents: ((config.sub_agents as Array<{ name: string; model: string; role: string }>) || []).map(
         (item) => ({ ...item })
       ),
@@ -799,13 +887,16 @@ async function loadDependencies() {
     { data: skillData },
     { data: categoryData },
     { data: kbOptionData },
+    { data: sandboxData },
   ] = await Promise.all([
     llmApi.pageProvider({ page_no: 1, page_size: 200 }),
     toolApi.pageTool({ page_no: 1, page_size: 1000, tool_status: "enabled" }),
     skillApi.pageSkill({ page_no: 1, page_size: 1000, skill_status: "enabled" }),
     categoryApi.listAppCategory(),
     kbApi.listKbOptions(),
+    sandboxApi.listSandboxImage(),
   ]);
+  sandboxImages.value = sandboxData.data || [];
   kbOptions.value = kbOptionData.data || [];
   kbOptionsLoading.value = false;
   providerList.value = providerData.data.filter((item) => item.models.length > 0);
@@ -838,6 +929,16 @@ async function submitForm() {
   if (!formModel.app_type) {
     message.error("请选择应用类型");
     return;
+  }
+  if (formModel.app_type === "agent" && sandboxEnabled.value) {
+    if (!sandboxImages.value.length) {
+      message.error("已启用沙盒,但暂无可用镜像;请先在 系统配置 → 沙盒管理 添加并启用");
+      return;
+    }
+    if (!agentConfig.sandbox_image_id) {
+      message.error("启用沙盒后请选择一个沙盒");
+      return;
+    }
   }
   submitting.value = true;
   try {
@@ -1100,6 +1201,60 @@ onMounted(async () => {
 
 .full-width {
   width: 100%;
+}
+
+.sandbox-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.sandbox-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: 100%;
+}
+
+.sandbox-picker :deep(.ant-radio-wrapper) {
+  align-items: flex-start;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--surface-divider);
+  border-radius: 8px;
+  min-width: 240px;
+}
+
+.sandbox-picker :deep(.ant-radio-wrapper-checked) {
+  border-color: var(--color-primary);
+  background: var(--surface-hover, rgba(0, 0, 0, 0.02));
+}
+
+.sandbox-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sandbox-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sandbox-card-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.sandbox-card-image {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.sandbox-card-desc {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
 }
 
 @media (max-width: 960px) {

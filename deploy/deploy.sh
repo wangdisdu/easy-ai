@@ -34,6 +34,13 @@ fi
 
 COMPOSE=(docker compose -p "${PROJECT}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}")
 
+# SANDBOX_ENABLED=true 时自动加上 sandbox profile,把 opensandbox-server 与
+# sandbox-desktop(本地构建可视化镜像)一并纳入 up/down/build/ps。
+if grep -qE '^SANDBOX_ENABLED=true' "${ENV_FILE}"; then
+    COMPOSE+=(--profile sandbox)
+    echo "[easy-ai] sandbox profile enabled (SANDBOX_ENABLED=true)"
+fi
+
 cmd="${1:-up}"
 shift || true
 

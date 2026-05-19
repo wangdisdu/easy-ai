@@ -114,9 +114,7 @@ class KbRetrieveService:
         )
         return KbRetrieveResp(hits=hits, total=total or len(hits))
 
-    def _build_doc_lookup(
-        self, db: Session, chunks: list[dict]
-    ) -> dict[str, TbKbDocument]:
+    def _build_doc_lookup(self, db: Session, chunks: list[dict]) -> dict[str, TbKbDocument]:
         """以 ragflow_doc_id 为 key, 反查 tb_kb_document 实体, 用于 hit 反向
         填充 easy-ai 侧的 doc_ref/kb_id/easyai_doc_id."""
         ids = {c.get("document_id") or c.get("doc_id") for c in chunks}
@@ -124,9 +122,7 @@ class KbRetrieveService:
         ids.discard("")
         if not ids:
             return {}
-        rows = db.scalars(
-            select(TbKbDocument).where(TbKbDocument.ragflow_doc_id.in_(ids))
-        ).all()
+        rows = db.scalars(select(TbKbDocument).where(TbKbDocument.ragflow_doc_id.in_(ids))).all()
         return {r.ragflow_doc_id: r for r in rows if r.ragflow_doc_id}
 
     def _resolve_rerank_id(self, db: Session, requested: str | None) -> str | None:
@@ -140,9 +136,7 @@ class KbRetrieveService:
         try:
             model_id = int(model_id_str)
         except ValueError:
-            logger.warning(
-                "[kb] system default rerank id=%r is not integer, ignored", model_id_str
-            )
+            logger.warning("[kb] system default rerank id=%r is not integer, ignored", model_id_str)
             return None
         row = db.execute(
             select(TbLlmModel, TbLlmProvider)

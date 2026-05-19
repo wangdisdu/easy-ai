@@ -56,11 +56,51 @@
       </div>
     </section>
 
-    <!-- 文档列表 -->
+    <!-- 文档区: 左分类树 + 右文档列表 -->
     <section class="docs-card">
+      <div class="docs-layout">
+        <!-- 分类树侧栏 -->
+        <aside class="cat-pane">
+          <div class="cat-head">
+            <span class="cat-title">分类</span>
+            <a-button
+              v-if="canEdit"
+              type="link"
+              size="small"
+              @click="openCreateCategory()"
+            >
+              <PlusOutlined /> 新建
+            </a-button>
+          </div>
+          <a-tree
+            class="cat-tree"
+            :tree-data="categoryTreeData"
+            :selected-keys="[selectedCatKey]"
+            block-node
+            @select="onSelectCategory"
+          >
+            <template #title="{ key, title, count, real }">
+              <span class="cat-node">
+                <span class="cat-name">{{ title }}</span>
+                <span v-if="count != null" class="cat-count">{{ count }}</span>
+                <a-dropdown v-if="canEdit && real" :trigger="['click']">
+                  <MoreOutlined class="cat-more" @click.stop />
+                  <template #overlay>
+                    <a-menu @click="(e: any) => onCatMenu(e.key, key as string)">
+                      <a-menu-item key="rename">重命名</a-menu-item>
+                      <a-menu-item key="delete" danger>删除</a-menu-item>
+                    </a-menu>
+                  </template>
+                </a-dropdown>
+              </span>
+            </template>
+          </a-tree>
+        </aside>
+
+        <div class="docs-main">
       <div class="docs-head">
         <div>
-          <h3 class="docs-title">文档</h3>
+          <h3 class="docs-title">{{ selectedCatTitle }}</h3>
           <p class="docs-sub">{{ docTotal }} 篇文档，状态由后台每 30 秒回拉一次</p>
         </div>
         <div class="docs-tools">
@@ -81,6 +121,12 @@
           />
           <a-button
             v-if="canEdit && selectedDocIds.length"
+            @click="openMoveDocs"
+          >
+            移动 ({{ selectedDocIds.length }})
+          </a-button>
+          <a-button
+            v-if="canEdit && selectedDocIds.length"
             danger
             @click="onBatchDelete"
           >
@@ -96,49 +142,49 @@
         :pagination="false"
         row-key="id"
         size="middle"
+        :scroll="{ x: 860 }"
         :row-selection="canEdit ? { selectedRowKeys: selectedDocIds, onChange: onSelectChange } : undefined"
       >
         <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'name'">
-            <a class="doc-name" @click.prevent="openDocDetail(record)">{{ record.name }}</a>
-          </template>
-          <template v-else-if="column.key === 'parse_status'">
-            <template v-if="record.parse_status === 'parsing'">
-              <a-tooltip :title="record.parse_progress_msg || '正在解析'">
-                <div class="parse-progress">
-                  <a-progress
-                    :percent="parsePercent(record)"
-                    size="small"
-                    status="active"
-                    :show-info="true"
-                  />
-                  <div class="parse-meta">已耗时 {{ elapsedLabel(record) }}</div>
-                </div>
-              </a-tooltip>
-            </template>
-            <template v-else>
-              <span :class="['parse-pill', `parse-pill--${record.parse_status}`]">
-                {{ parseStatusLabel[record.parse_status] || record.parse_status }}
-              </span>
-              <span
-                v-if="record.parse_status === 'done' && record.parse_duration_sec"
-                class="parse-meta"
-              >
-                耗时 {{ formatDuration(record.parse_duration_sec) }}
-              </span>
-              <span
-                v-if="record.parse_status === 'error' && record.error_message"
-                class="err-msg"
-              >
-                {{ record.error_message }}
-              </span>
-            </template>
-          </template>
-          <template v-else-if="column.key === 'size_bytes'">
-            {{ humanSize(record.size_bytes) }}
-          </template>
-          <template v-else-if="column.key === 'update_time'">
-            {{ formatMs(record.update_time) }}
+          <template v-if="column.key === 'doc'">
+            <div class="doc-cell">
+              <a class="doc-name" @click.prevent="openDocDetail(record)">
+                {{ record.name }}
+              </a>
+              <div class="doc-meta">
+                <template v-if="record.parse_status === 'parsing'">
+                  <a-tooltip :title="record.parse_progress_msg || '正在解析'">
+                    <span class="parse-progress-inline">
+                      <a-progress
+                        :percent="parsePercent(record)"
+                        size="small"
+                        status="active"
+                        :show-info="true"
+                      />
+                      <span class="parse-meta">已耗时 {{ elapsedLabel(record) }}</span>
+                    </span>
+                  </a-tooltip>
+                </template>
+                <template v-else>
+                  <span :class="['parse-pill', `parse-pill--${record.parse_status}`]">
+                    {{ parseStatusLabel[record.parse_status] || record.parse_status }}
+                  </span>
+                  <span
+                    v-if="record.parse_status === 'done' && record.parse_duration_sec"
+                    class="parse-meta"
+                  >
+                    耗时 {{ formatDuration(record.parse_duration_sec) }}
+                  </span>
+                </template>
+                <span class="doc-time">{{ formatMs(record.update_time) }}</span>
+                <span
+                  v-if="record.parse_status === 'error' && record.error_message"
+                  class="err-msg"
+                >
+                  {{ record.error_message }}
+                </span>
+              </div>
+            </div>
           </template>
           <template v-else-if="column.key === 'action'">
             <a-button type="link" size="small" @click="previewDoc(record)">预览</a-button>
@@ -185,7 +231,43 @@
           @change="loadDocs"
         />
       </div>
+        </div>
+      </div>
     </section>
+
+    <!-- 新建 / 重命名分类 -->
+    <a-modal
+      v-model:open="catModalOpen"
+      :title="catModalMode === 'rename' ? '重命名分类' : '新建分类'"
+      :confirm-loading="catSaving"
+      ok-text="保存"
+      @ok="onSaveCategory"
+    >
+      <a-input
+        v-model:value="catModalName"
+        placeholder="分类名称"
+        :maxlength="255"
+        @press-enter="onSaveCategory"
+      />
+    </a-modal>
+
+    <!-- 移动文档到分类 -->
+    <a-modal
+      v-model:open="moveModalOpen"
+      title="移动到分类"
+      :confirm-loading="moving"
+      ok-text="移动"
+      @ok="onMoveDocs"
+    >
+      <p class="move-tip">将选中的 {{ selectedDocIds.length }} 篇文档移动到:</p>
+      <a-tree-select
+        v-model:value="moveTargetCat"
+        :tree-data="catTreeSelectData"
+        tree-default-expand-all
+        placeholder="选择目标分类"
+        style="width: 100%"
+      />
+    </a-modal>
 
     <!-- 文档详情 drawer -->
     <a-drawer
@@ -322,12 +404,14 @@ import {
   ArrowLeftOutlined,
   DatabaseOutlined,
   DownOutlined,
+  MoreOutlined,
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons-vue";
 import { Modal, message } from "ant-design-vue";
 import * as kbApi from "@/api/kb";
 import type {
+  KbCategoryNode,
   KbChunkResp,
   KbDocumentResp,
   KbResp,
@@ -364,14 +448,11 @@ const parseStatusOptions = Object.entries(parseStatusLabel).map(([value, label])
   label,
 }));
 
+// 左侧分类列表占了 240px, 文档区窄。文档名 / 解析状态 / 更新时间合并到单元格,
+// 只保留"文档 + 操作"两列。
 const docColumns = [
-  { title: "文档名称", dataIndex: "name", key: "name" },
-  { title: "格式", dataIndex: "format", key: "format", width: 80 },
-  { title: "大小", dataIndex: "size_bytes", key: "size_bytes", width: 100 },
-  { title: "解析状态", dataIndex: "parse_status", key: "parse_status", width: 180 },
-  { title: "chunks", dataIndex: "chunks_count", key: "chunks_count", width: 80 },
-  { title: "更新时间", dataIndex: "update_time", key: "update_time", width: 160 },
-  { title: "操作", key: "action", width: 200 },
+  { title: "文档", key: "doc" },
+  { title: "操作", key: "action", width: 170, fixed: "right" as const },
 ];
 
 // ── KB 数据 ──
@@ -388,7 +469,203 @@ async function onDelete() {
 }
 
 function goImport() {
-  router.push(`/knowledge/import/${kbId.value}`);
+  // 当前选中真实分类时, 预选到上传页
+  const k = selectedCatKey.value;
+  const q =
+    k !== "__all__" && k !== "0" ? `?category_id=${k}` : "";
+  router.push(`/knowledge/import/${kbId.value}${q}`);
+}
+
+// ── 分类(单层扁平)──
+const categoryTree = ref<KbCategoryNode[]>([]);
+const selectedCatKey = ref<string>("__all__");
+
+// 后端 schema 仍是树, 但已停用子分类。这里把任何层级递归拍平成单层,
+// 即便存在历史嵌套数据也按扁平展示。
+function flattenCats(nodes: KbCategoryNode[]): KbCategoryNode[] {
+  const out: KbCategoryNode[] = [];
+  const walk = (ns: KbCategoryNode[]) => {
+    for (const n of ns) {
+      out.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
+
+type CatTreeNode = {
+  key: string;
+  title: string;
+  count: number | null;
+  real: boolean;
+  selectable: boolean;
+  children?: CatTreeNode[];
+};
+
+const categoryTreeData = computed<CatTreeNode[]>(() => [
+  { key: "__all__", title: "全部", count: null, real: false, selectable: true },
+  { key: "0", title: "未分类", count: null, real: false, selectable: true },
+  ...flattenCats(categoryTree.value).map((n) => ({
+    key: n.id,
+    title: n.name,
+    count: n.doc_count,
+    real: true,
+    selectable: true,
+  })),
+]);
+
+// a-tree-select 用(移动 / 上传): 含"未分类", 不含"全部"; 扁平单层
+type CatSelectNode = { value: string; title: string };
+const catTreeSelectData = computed<CatSelectNode[]>(() => [
+  { value: "0", title: "未分类" },
+  ...flattenCats(categoryTree.value).map((n) => ({
+    value: n.id,
+    title: n.name,
+  })),
+]);
+
+const selectedCatTitle = computed(() => {
+  const k = selectedCatKey.value;
+  if (k === "__all__") return "全部文档";
+  if (k === "0") return "未分类";
+  const find = (ns: KbCategoryNode[]): string | null => {
+    for (const n of ns) {
+      if (n.id === k) return n.name;
+      const sub = find(n.children);
+      if (sub) return sub;
+    }
+    return null;
+  };
+  return find(categoryTree.value) ?? "文档";
+});
+
+async function loadCategoryTree() {
+  try {
+    const { data } = await kbApi.getKbCategoryTree(kbId.value);
+    categoryTree.value = data.data;
+  } catch {
+    categoryTree.value = [];
+  }
+}
+
+function onSelectCategory(keys: (string | number)[]) {
+  // a-tree 再次点同一节点会传空, 此时保持原选择
+  if (!keys.length) return;
+  selectedCatKey.value = String(keys[0]);
+  docPageNo.value = 1;
+  selectedDocIds.value = [];
+  loadDocs();
+}
+
+// ── 分类增删改 ──
+const catModalOpen = ref(false);
+const catModalMode = ref<"create" | "rename">("create");
+const catModalName = ref("");
+const catModalTarget = ref<string>("");
+const catSaving = ref(false);
+
+function openCreateCategory() {
+  catModalMode.value = "create";
+  catModalName.value = "";
+  catModalOpen.value = true;
+}
+
+function openRenameCategory(catId: string, current: string) {
+  catModalMode.value = "rename";
+  catModalName.value = current;
+  catModalTarget.value = catId;
+  catModalOpen.value = true;
+}
+
+async function onSaveCategory() {
+  const name = catModalName.value.trim();
+  if (!name) {
+    message.warning("请输入分类名称");
+    return;
+  }
+  catSaving.value = true;
+  try {
+    if (catModalMode.value === "create") {
+      // 单层扁平: 始终建在知识库根下
+      await kbApi.createKbCategory(kbId.value, { name, parent_id: "0" });
+      message.success("分类已创建");
+    } else {
+      await kbApi.updateKbCategory(kbId.value, catModalTarget.value, { name });
+      message.success("已重命名");
+    }
+    catModalOpen.value = false;
+    await loadCategoryTree();
+  } finally {
+    catSaving.value = false;
+  }
+}
+
+function findCatName(ns: KbCategoryNode[], id: string): string {
+  for (const n of ns) {
+    if (n.id === id) return n.name;
+    const sub = findCatName(n.children, id);
+    if (sub) return sub;
+  }
+  return "";
+}
+
+function onCatMenu(action: string, catId: string) {
+  if (action === "rename") {
+    openRenameCategory(catId, findCatName(categoryTree.value, catId));
+  } else if (action === "delete") {
+    confirmDeleteCategory(catId);
+  }
+}
+
+async function confirmDeleteCategory(catId: string) {
+  // 先 dry-run 拿影响面
+  const { data } = await kbApi.deleteKbCategory(kbId.value, catId, false);
+  const p = data.data;
+  Modal.confirm({
+    title: "确定删除该分类?",
+    content:
+      `将删除该分类及其下 ${p.document_count} 篇文档，` +
+      `文档会同步从 RAGFlow 移除，且无法撤销。`,
+    okText: "删除",
+    okType: "danger",
+    cancelText: "取消",
+    async onOk() {
+      await kbApi.deleteKbCategory(kbId.value, catId, true);
+      message.success("分类已删除");
+      if (selectedCatKey.value === catId) selectedCatKey.value = "__all__";
+      await loadCategoryTree();
+      await loadDocs();
+    },
+  });
+}
+
+// ── 文档移动 ──
+const moveModalOpen = ref(false);
+const moveTargetCat = ref<string>("0");
+const moving = ref(false);
+
+function openMoveDocs() {
+  moveTargetCat.value = "0";
+  moveModalOpen.value = true;
+}
+
+async function onMoveDocs() {
+  moving.value = true;
+  try {
+    await kbApi.moveKbDocuments(
+      kbId.value,
+      selectedDocIds.value,
+      moveTargetCat.value,
+    );
+    message.success(`已移动 ${selectedDocIds.value.length} 篇`);
+    moveModalOpen.value = false;
+    selectedDocIds.value = [];
+    await loadCategoryTree();
+    await loadDocs();
+  } finally {
+    moving.value = false;
+  }
 }
 
 // ── 文档列表 + 轮询 ──
@@ -406,10 +683,12 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 async function loadDocs(showSpin = true) {
   if (showSpin) docsLoading.value = true;
   try {
+    const catKey = selectedCatKey.value;
     const { data } = await kbApi.pageKbDocuments(kbId.value, {
       page_no: docPageNo.value,
       page_size: docPageSize.value,
       keyword: docKeyword.value || undefined,
+      category_id: catKey === "__all__" ? undefined : catKey,
       parse_status: docStatusFilter.value,
     });
     docs.value = data.data;
@@ -598,6 +877,7 @@ function humanSize(n: number | null | undefined): string {
 
 onMounted(async () => {
   await loadKb();
+  await loadCategoryTree();
   await loadDocs();
 });
 </script>
@@ -768,6 +1048,43 @@ onMounted(async () => {
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
+/* 合并单元格: 文档名 + 解析状态 + 更新时间一格 */
+.doc-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.doc-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+.doc-meta .parse-meta,
+.doc-meta .err-msg {
+  display: inline;
+  margin-top: 0;
+}
+.doc-meta .err-msg {
+  flex-basis: 100%;
+}
+.doc-time {
+  color: var(--color-text-tertiary);
+}
+.parse-progress-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 160px;
+}
+.parse-progress-inline :deep(.ant-progress) {
+  width: 120px;
+}
+.parse-progress-inline :deep(.ant-progress-text) {
+  font-size: 11px;
+}
 .ref-hint {
   margin-left: 12px;
   font-size: 12px;
@@ -780,6 +1097,65 @@ onMounted(async () => {
   border: 1px solid var(--color-border);
   border-radius: 14px;
   padding: 18px 20px;
+}
+.docs-layout {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.cat-pane {
+  width: 240px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--color-border);
+  padding-right: 14px;
+}
+.cat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cat-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+.cat-tree {
+  font-size: 13px;
+}
+.cat-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.cat-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cat-count {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  background: var(--surface-soft);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.cat-more {
+  color: var(--color-text-tertiary);
+  padding: 0 2px;
+}
+.cat-more:hover {
+  color: var(--color-text);
+}
+.docs-main {
+  flex: 1;
+  min-width: 0;
+}
+.move-tip {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
 .docs-head {
   display: flex;

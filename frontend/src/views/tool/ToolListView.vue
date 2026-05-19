@@ -48,42 +48,48 @@
     </div>
 
     <a-spin :spinning="loading">
-      <!-- Builtin Tools -->
+      <!-- Builtin Tools (按 group 分段:文件 / 沙盒 / 桌面操控 / 记忆) -->
       <template v-if="showBuiltin && builtinFiltered.length">
         <div class="section-label">
           <span class="section-dot section-dot--builtin" />
           系统内置
         </div>
-        <div class="tool-list">
-          <div
-            v-for="t in builtinFiltered"
-            :key="t.tool_name"
-            class="tool-card"
-            @click="toggleExpand('builtin-' + t.tool_name)"
-          >
-            <div class="tool-card-row">
-              <div class="tool-icon tool-icon--builtin">
-                <SettingOutlined />
-              </div>
-              <div class="tool-card-body">
-                <div class="tool-card-name-row">
-                  <span class="tool-card-name">{{ t.tool_name }}</span>
-                  <span class="source-tag source-tag--builtin">系统内置</span>
+        <div v-for="grp in builtinGroups" :key="grp.group" class="builtin-group">
+          <div class="builtin-group-header">
+            <span class="builtin-group-name">{{ grp.group }}</span>
+            <span class="builtin-group-count">{{ grp.tools.length }} 个工具</span>
+          </div>
+          <div class="tool-list">
+            <div
+              v-for="t in grp.tools"
+              :key="t.tool_name"
+              class="tool-card"
+              @click="toggleExpand('builtin-' + t.tool_name)"
+            >
+              <div class="tool-card-row">
+                <div class="tool-icon tool-icon--builtin">
+                  <SettingOutlined />
                 </div>
-                <p class="tool-card-desc">{{ t.description }}</p>
+                <div class="tool-card-body">
+                  <div class="tool-card-name-row">
+                    <span class="tool-card-name">{{ t.tool_name }}</span>
+                    <span class="source-tag source-tag--builtin">系统内置</span>
+                  </div>
+                  <p class="tool-card-desc">{{ t.description }}</p>
+                </div>
+                <DownOutlined
+                  class="expand-arrow"
+                  :class="{ 'expand-arrow--open': expandedId === 'builtin-' + t.tool_name }"
+                />
               </div>
-              <DownOutlined
-                class="expand-arrow"
-                :class="{ 'expand-arrow--open': expandedId === 'builtin-' + t.tool_name }"
-              />
-            </div>
-            <div v-if="expandedId === 'builtin-' + t.tool_name" class="tool-detail" @click.stop>
-              <div class="detail-section">
-                <span class="detail-label">参数定义（JSON Schema）</span>
-                <pre class="detail-json">{{ JSON.stringify(t.parameters, null, 2) }}</pre>
-              </div>
-              <div class="detail-footer">
-                <span class="detail-hint">系统内置工具，不可编辑</span>
+              <div v-if="expandedId === 'builtin-' + t.tool_name" class="tool-detail" @click.stop>
+                <div class="detail-section">
+                  <span class="detail-label">参数定义（JSON Schema）</span>
+                  <pre class="detail-json">{{ JSON.stringify(t.parameters, null, 2) }}</pre>
+                </div>
+                <div class="detail-footer">
+                  <span class="detail-hint">系统内置工具，不可编辑</span>
+                </div>
               </div>
             </div>
           </div>
@@ -370,6 +376,25 @@ const builtinFiltered = computed(() => {
   return builtinTools.value.filter(
     (t) => t.tool_name.toLowerCase().includes(kw) || t.description.toLowerCase().includes(kw)
   );
+});
+
+// 系统内置工具按 group 分段展示;未指定 group 归入"其他"。固定优先级顺序。
+const BUILTIN_GROUP_ORDER = ["文件", "沙盒", "桌面操控", "记忆", "其他"] as const;
+const builtinGroups = computed<{ group: string; tools: BuiltinToolResp[] }[]>(() => {
+  const map = new Map<string, BuiltinToolResp[]>();
+  for (const t of builtinFiltered.value) {
+    const g = t.group || "其他";
+    (map.get(g) || map.set(g, []).get(g)!).push(t);
+  }
+  const ordered: { group: string; tools: BuiltinToolResp[] }[] = [];
+  for (const g of BUILTIN_GROUP_ORDER) {
+    const tools = map.get(g);
+    if (tools && tools.length) ordered.push({ group: g, tools });
+    map.delete(g);
+  }
+  // 兜底:出现非预设分组(代码漏配)也展示在最后
+  for (const [g, tools] of map.entries()) ordered.push({ group: g, tools });
+  return ordered;
 });
 
 const mcpTools = computed(() => dbTools.value.filter((t) => t.source === "mcp"));
@@ -829,6 +854,30 @@ onMounted(() => {
   padding: 2px 8px;
   border-radius: 999px;
   flex-shrink: 0;
+}
+
+/* 系统内置工具的二级分组(文件/沙盒/桌面操控/记忆) */
+.builtin-group {
+  margin-top: 14px;
+}
+
+.builtin-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  margin-bottom: 6px;
+}
+
+.builtin-group-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.builtin-group-count {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
 }
 
 .detail-kv-list {

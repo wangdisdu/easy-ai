@@ -25,7 +25,7 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
-from app.db.schema import TbKb, TbKbDocument
+from app.db.schema import TbKb, TbKbCategory, TbKbDocument
 from app.integration import ragflow_client
 from app.model.kb_model import KbChunkResp, KbDocumentPageReq, KbDocumentResp
 from app.service.kb_errors import to_service_error
@@ -133,7 +133,7 @@ class KbDocumentService:
         db: Session,
         kb_id: int,
         files: list[tuple[str, bytes]],
-        category: str | None,
+        category_id: int,
         req_ctx: RequestContext,
     ) -> list[KbDocumentResp]:
         """``files`` 为 (filename, blob) 列表。
@@ -157,6 +157,7 @@ class KbDocumentService:
                 )
 
         kb = self._get_kb_or_raise(db, kb_id)
+        self._assert_category_in_kb(db, kb_id, category_id)
         if not kb.ragflow_dataset_id:
             raise ServiceError(ErrorCode.BAD_REQUEST, f"kb {kb_id} not linked to ragflow dataset")
 
@@ -209,7 +210,7 @@ class KbDocumentService:
                     name=display_name,
                     format=_infer_format(display_name),
                     size_bytes=len(blob),
-                    category=category,
+                    category_id=category_id,
                     source_type="file",
                     source_meta=json.dumps({"display_name": display_name}, ensure_ascii=False),
                     ragflow_doc_id=doc.get("id"),
@@ -229,7 +230,7 @@ class KbDocumentService:
                 entity.parse_status = "parsing"
                 entity.chunks_count = 0
                 entity.error_message = None
-                entity.category = category
+                entity.category_id = category_id
                 entity.update_time = now
                 entity.update_user = req_ctx.user_id
             result.append(entity)
@@ -253,7 +254,33 @@ class KbDocumentService:
             len(result),
             ragflow_doc_ids,
         )
-        return [KbDocumentResp.from_entity(r) for r in result]
+        name_map = self._category_name_map(db, kb_id)
+        return [KbDocumentResp.from_entity(r, name_map.get(r.category_id)) for r in result]
+
+    def move_documents(
+        self,
+        db: Session,
+        kb_id: int,
+        doc_ids: list[int],
+        category_id: int,
+        req_ctx: RequestContext,
+    ) -> int:
+        """把文档移动到目标分类。纯本地操作, 不触达 RAGFlow。"""
+        if not doc_ids:
+            return 0
+        self._get_kb_or_raise(db, kb_id)
+        self._assert_category_in_kb(db, kb_id, category_id)
+        rows = db.scalars(
+            select(TbKbDocument).where(TbKbDocument.kb_id == kb_id, TbKbDocument.id.in_(doc_ids))
+        ).all()
+        now = req_ctx.request_time_ms
+        for row in rows:
+            row.category_id = category_id
+            row.update_time = now
+            row.update_user = req_ctx.user_id
+        db.commit()
+        logger.info("[kb] action=move_docs kb_id=%s n=%d cat=%s", kb_id, len(rows), category_id)
+        return len(rows)
 
     def delete_documents(
         self, db: Session, kb_id: int, doc_ids: list[int], req_ctx: RequestContext
@@ -342,7 +369,15 @@ class KbDocumentService:
             keyword = f"%{req.keyword}%"
             conditions.append(or_(TbKbDocument.name.like(keyword)))
         if req.category:
+            # 旧字符串过滤, 向后兼容
             conditions.append(TbKbDocument.category == req.category)
+        if req.category_id is not None:
+            cid = int(req.category_id)
+            if req.recursive and cid > 0:
+                sub_ids = self._subtree_category_ids(db, kb_id, cid)
+                conditions.append(TbKbDocument.category_id.in_(sub_ids))
+            else:
+                conditions.append(TbKbDocument.category_id == cid)
         if req.parse_status:
             conditions.append(TbKbDocument.parse_status == req.parse_status)
         if conditions:
@@ -355,7 +390,8 @@ class KbDocumentService:
             .offset((req.page_no - 1) * req.page_size)
             .limit(req.page_size)
         ).all()
-        return [KbDocumentResp.from_entity(r) for r in rows], total
+        name_map = self._category_name_map(db, kb_id)
+        return [KbDocumentResp.from_entity(r, name_map.get(r.category_id)) for r in rows], total
 
     def get_document_detail(
         self, db: Session, kb_id: int, doc_id: int, req_ctx: RequestContext
@@ -383,7 +419,7 @@ class KbDocumentService:
                 if updated:
                     db.commit()
                     db.refresh(entity)
-        return KbDocumentResp.from_entity(entity)
+        return KbDocumentResp.from_entity(entity, self._one_category_name(db, entity))
 
     def get_document_by_ref(self, db: Session, ref: str) -> KbDocumentResp:
         """Base36 引用码 → KbDocumentResp。无需 kb_id;若 ref 无效或文档
@@ -396,10 +432,8 @@ class KbDocumentService:
             raise ServiceError(ErrorCode.BAD_REQUEST, f"invalid doc ref: {ref}") from e
         entity = db.get(TbKbDocument, doc_id)
         if not entity:
-            raise ServiceError(
-                ErrorCode.DATA_NOT_FOUND, f"document not found for ref={ref}"
-            )
-        return KbDocumentResp.from_entity(entity)
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, f"document not found for ref={ref}")
+        return KbDocumentResp.from_entity(entity, self._one_category_name(db, entity))
 
     def download_document(
         self, db: Session, kb_id: int, doc_id: int, req_ctx: RequestContext
@@ -425,8 +459,9 @@ class KbDocumentService:
                 kb.ragflow_dataset_id, entity.ragflow_doc_id, user_id=req_ctx.user_id
             )
         except ragflow_client.RagflowClientError as e:
-            logger.error("[kb] download upstream failed kb_id=%s doc_id=%s err=%s",
-                         kb_id, doc_id, e)
+            logger.error(
+                "[kb] download upstream failed kb_id=%s doc_id=%s err=%s", kb_id, doc_id, e
+            )
             raise to_service_error(e, "download_document") from e
         mime = _infer_mime(entity.name) or "application/octet-stream"
         return blob, mime, entity.name
@@ -586,6 +621,45 @@ class KbDocumentService:
         if changed:
             entity.update_time = now_ms
         return changed
+
+    def _category_name_map(self, db: Session, kb_id: int) -> dict[int, str]:
+        """kb 内 {category_id: name},用于列表/详情回填 category_name。"""
+        rows = db.execute(
+            select(TbKbCategory.id, TbKbCategory.name).where(TbKbCategory.kb_id == kb_id)
+        ).all()
+        return {cid: name for cid, name in rows}
+
+    def _subtree_category_ids(self, db: Session, kb_id: int, category_id: int) -> list[int]:
+        node = db.get(TbKbCategory, category_id)
+        if not node or node.kb_id != kb_id:
+            raise ServiceError(
+                ErrorCode.DATA_NOT_FOUND,
+                f"kb_category not found: kb={kb_id} cat={category_id}",
+            )
+        rows = db.scalars(
+            select(TbKbCategory.id).where(
+                TbKbCategory.kb_id == kb_id,
+                TbKbCategory.id_path.like(f"{node.id_path}%"),
+            )
+        ).all()
+        return list(rows)
+
+    def _one_category_name(self, db: Session, entity: TbKbDocument) -> str | None:
+        if entity.category_id <= 0:
+            return None
+        node = db.get(TbKbCategory, entity.category_id)
+        return node.name if node else None
+
+    def _assert_category_in_kb(self, db: Session, kb_id: int, category_id: int) -> None:
+        """category_id<=0(未分类)直接放行; 否则必须是本 kb 下已存在的分类。"""
+        if category_id <= 0:
+            return
+        node = db.get(TbKbCategory, category_id)
+        if not node or node.kb_id != kb_id:
+            raise ServiceError(
+                ErrorCode.DATA_NOT_FOUND,
+                f"kb_category not found: kb={kb_id} cat={category_id}",
+            )
 
     def _require_ragflow_enabled(self) -> None:
         if not settings.ragflow_enabled:

@@ -508,8 +508,12 @@ class TbKbDocument(Base):
     # PDF / DOCX / XLSX / MD / TXT / CSV / JSON / IMG / API / DB
     format: Mapped[str] = mapped_column(String(32), nullable=False)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    # 业务分类标签, 仅前端筛选用, 不参与 RAGFlow 侧建模
+    # 业务分类标签(旧, 字符串)。已被 category_id 取代, 下个迭代删列;
+    # 现阶段保留只读, 新写入只更新 category_id。
     category: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 树形分类节点 id(tb_kb_category.id); 0 = 未分类(直挂知识库根)。
+    # 纯 easy-ai 侧元数据, 不参与 RAGFlow 建模。
+    category_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     # file / ones / api_pull / api_push / confluence
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     # connector 私有字段(filePath / sourceUrl / syncSchedule 等), JSON 字符串
@@ -531,6 +535,35 @@ class TbKbDocument(Base):
     update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class TbKbCategory(Base):
+    """知识库内文档分类(树形, 单归属)。
+
+    纯 easy-ai 侧组织维度, RAGFlow 完全不感知。约定:
+    - ``parent_id = 0`` 表示挂在知识库根下
+    - ``id_path`` 物化路径 ``/<id>/<id>/...`` 以自身 id 结尾(含前后斜杠),
+      子树查询用 ``id_path LIKE '<父path>%'``, 级联删除同理
+    - ``level`` 深度, 根级 = 1, 上限见 KbCategoryService.MAX_DEPTH
+    - 同级(同 kb_id + parent_id)下 name 唯一
+    """
+
+    __tablename__ = "tb_kb_category"
+    __table_args__ = (
+        UniqueConstraint("kb_id", "parent_id", "name", name="uk_tb_kb_category_sibling"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kb_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    parent_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    id_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class TbSystemSetting(Base):
     """平台级配置 KV。key 命名空间见 docs/knowledge-rag-impl-plan.md §4 Step 1:
     ai.default.embedding_model_id / ai.default.rerank_model_id / ...
@@ -541,4 +574,27 @@ class TbSystemSetting(Base):
     setting_key: Mapped[str] = mapped_column(String(128), primary_key=True)
     setting_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbSandboxImage(Base):
+    """沙盒镜像目录(平台级)。Agent 应用在 ``app_config.sandbox.image_id``
+    里从中选一个作为隔离执行环境的镜像;未选则用 ``is_default`` 的那条。
+    详见 docs/sandbox-design.md §7。"""
+
+    __tablename__ = "tb_sandbox_image"
+    __table_args__ = (UniqueConstraint("name", name="uk_tb_sandbox_image_name"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    image: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 默认资源画像,透传 OpenSandbox create(resource=...);空=不限制
+    cpu: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    memory: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_default: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

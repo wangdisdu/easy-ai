@@ -418,6 +418,14 @@
             <div class="test-composer-bar">
               <span v-if="streamMeta.model" class="test-meta-tag">{{ streamMeta.model }}</span>
               <span class="test-composer-spacer" />
+              <a-button
+                v-if="sandboxEnabled"
+                size="small"
+                :disabled="!currentThreadId"
+                @click="openDesktop"
+              >
+                沙盒桌面
+              </a-button>
               <a-button v-if="isStreaming" size="small" danger @click="onStopStream">停止</a-button>
               <a-button
                 type="primary"
@@ -584,6 +592,27 @@
       </div>
     </a-drawer>
 
+    <a-modal
+      v-model:open="desktopOpen"
+      title="沙盒桌面"
+      :width="1320"
+      :footer="null"
+      destroy-on-close
+      wrap-class-name="sandbox-desktop-modal"
+      @cancel="closeDesktop"
+    >
+      <a-spin v-if="desktopLoading" tip="正在拉起沙盒桌面…">
+        <div class="sandbox-desktop-frame" />
+      </a-spin>
+      <iframe
+        v-else-if="desktopUrl"
+        :src="desktopUrl"
+        class="sandbox-desktop-frame"
+        allow="clipboard-read; clipboard-write"
+      />
+      <a-empty v-else description="沙盒桌面不可用" />
+    </a-modal>
+
     <a-drawer
       v-model:open="logDetailOpen"
       title="消息详情"
@@ -685,6 +714,7 @@ import { renderMarkdownWithDocRefs } from "@/composables/useMarkdown";
 import * as appApi from "@/api/app";
 import * as kbApi from "@/api/kb";
 import * as llmApi from "@/api/llm";
+import { getSandboxView } from "@/api/sandboxImage";
 import type { HitlAction } from "@/api/conversation";
 import type { AppLogResp, AppResp, AppRunReference, AppVersionResp } from "@/api/types";
 import type { SSEEvent } from "@/api/sse";
@@ -740,6 +770,53 @@ const pendingHitlRunId = ref<string | null>(null);
 const hitlBusy = ref(false);
 const currentThreadId = ref<string | null>(null);
 let hitlTimeoutFlag = false;
+
+// ── 可视化沙盒(noVNC 桌面)──
+const sandboxEnabled = computed(() => {
+  const rb = (app.value?.app_config as Record<string, unknown> | undefined)?.runtime_backend;
+  return typeof rb === "string" && rb !== "state";
+});
+const desktopOpen = ref(false);
+const desktopLoading = ref(false);
+const desktopUrl = ref("");
+
+function closeDesktop() {
+  desktopOpen.value = false;
+  desktopUrl.value = ""; // 清空 iframe,断开 VNC 连接
+}
+
+async function openDesktop() {
+  if (!currentThreadId.value) {
+    message.info("先发起一次对话(触发沙盒)后再打开桌面");
+    return;
+  }
+  desktopOpen.value = true;
+  desktopLoading.value = true;
+  desktopUrl.value = "";
+  // 沙盒可能要等首个工具调用才创建;轮询几次直到 ready
+  for (let i = 0; i < 10; i += 1) {
+    try {
+      const { data } = await getSandboxView(currentThreadId.value);
+      if (data.data.ready && data.data.url) {
+        const u = new URL(data.data.url);
+        const prefix = u.pathname.replace(/^\/+|\/+$/g, ""); // sandboxes/<id>/proxy/6080
+        // websockify 自带 noVNC 网页客户端;path 指向经同一代理前缀的 ws,
+        // 否则 noVNC 默认连 /websockify 会绕过代理连不上。
+        const wsPath = encodeURIComponent(`${prefix}/websockify`);
+        desktopUrl.value =
+          `${u.origin}/${prefix}/vnc.html?autoconnect=true&resize=scale&path=${wsPath}`;
+        desktopLoading.value = false;
+        return;
+      }
+    } catch {
+      /* 继续重试 */
+    }
+    if (!desktopOpen.value) return; // 用户已关闭
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  desktopLoading.value = false;
+  message.warning("沙盒桌面尚未就绪:请确认该会话已触发沙盒工具(如 execute)");
+}
 const streamMeta = reactive<{ model: string; latency_ms: number | null; tokenUsage: TokenUsage | null }>({
   model: "",
   latency_ms: null,
@@ -2327,5 +2404,13 @@ onMounted(() => {
   .log-payload-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.sandbox-desktop-frame {
+  width: 100%;
+  height: 760px;
+  border: 0;
+  background: #1e1e1e;
+  display: block;
 }
 </style>

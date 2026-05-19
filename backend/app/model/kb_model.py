@@ -5,7 +5,7 @@ import json
 from pydantic import BaseModel, Field
 
 from app.core.doc_ref import encode_doc_ref
-from app.db.schema import TbKb, TbKbDocument
+from app.db.schema import TbKb, TbKbCategory, TbKbDocument
 
 # RAGFlow 支持的 chunk_method,与 ragflow_client.create_dataset 的入参对齐
 VALID_CHUNK_METHODS = {"naive", "qa", "manual", "book", "table", "laws"}
@@ -104,6 +104,55 @@ class KbOption(BaseModel):
     doc_count: int
 
 
+# ── KB Category(树形, 单归属, 纯 easy-ai 侧组织维度)──────────────────────
+
+
+class KbCategoryCreateReq(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    # 父分类 id; "0"(默认)表示挂在知识库根下
+    parent_id: str = Field(default="0")
+
+
+class KbCategoryUpdateReq(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    # 传入则表示移动到新父节点("0"=移到根); 不传不改父
+    parent_id: str | None = Field(default=None)
+    sort: int | None = Field(default=None)
+
+
+class KbCategoryNode(BaseModel):
+    """分类树节点。``doc_count`` 为直挂该节点(不含子树)的文档数。"""
+
+    id: str
+    kb_id: str
+    name: str
+    parent_id: str
+    level: int
+    sort: int
+    doc_count: int = 0
+    children: list[KbCategoryNode] = Field(default_factory=list)
+
+    @classmethod
+    def from_entity(cls, entity: TbKbCategory, doc_count: int = 0) -> KbCategoryNode:
+        return cls(
+            id=str(entity.id),
+            kb_id=str(entity.kb_id),
+            name=entity.name,
+            parent_id=str(entity.parent_id),
+            level=entity.level,
+            sort=entity.sort,
+            doc_count=doc_count,
+        )
+
+
+class KbCategoryDeletePreview(BaseModel):
+    """删除分类的影响面。``deleted=False`` 表示这是一次 dry-run(未带 confirm)。"""
+
+    deleted: bool
+    category_count: int = 0
+    document_count: int = 0
+
+
 # ── KB Document ─────────────────────────────────────────────────────────
 
 
@@ -111,8 +160,19 @@ class KbDocumentPageReq(BaseModel):
     page_no: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=10000)
     keyword: str | None = Field(default=None, max_length=255)
+    # 旧字符串过滤, 暂保留向后兼容; 新前端用 category_id
     category: str | None = Field(default=None, max_length=255)
+    # 分类节点 id; "0" 显式筛"未分类"; None 表示不按分类过滤
+    category_id: str | None = Field(default=None)
+    # True 时连同 category_id 子树下的文档一并返回
+    recursive: bool = Field(default=False)
     parse_status: str | None = Field(default=None, max_length=32)
+
+
+class KbDocumentMoveReq(BaseModel):
+    ids: list[str] = Field(min_length=1)
+    # 目标分类 id; "0"=移到未分类
+    category_id: str = Field(default="0")
 
 
 class KbDocumentResp(BaseModel):
@@ -124,7 +184,11 @@ class KbDocumentResp(BaseModel):
     name: str
     format: str
     size_bytes: int | None = None
+    # 旧字符串分类, 暂保留只读
     category: str | None = None
+    # 树形分类: "0"=未分类; category_name 由 service join 回填
+    category_id: str = "0"
+    category_name: str | None = None
     source_type: str
     source_meta: dict | None = None
     ragflow_doc_id: str | None = None
@@ -141,7 +205,7 @@ class KbDocumentResp(BaseModel):
     update_time: int
 
     @classmethod
-    def from_entity(cls, entity: TbKbDocument) -> KbDocumentResp:
+    def from_entity(cls, entity: TbKbDocument, category_name: str | None = None) -> KbDocumentResp:
         source_meta: dict | None = None
         if entity.source_meta:
             try:
@@ -156,6 +220,8 @@ class KbDocumentResp(BaseModel):
             format=entity.format,
             size_bytes=entity.size_bytes,
             category=entity.category,
+            category_id=str(entity.category_id),
+            category_name=category_name,
             source_type=entity.source_type,
             source_meta=source_meta,
             ragflow_doc_id=entity.ragflow_doc_id,

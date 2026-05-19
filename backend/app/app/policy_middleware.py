@@ -112,8 +112,10 @@ class PolicyMiddleware(AgentMiddleware):
         tool_name = request.tool_call.get("name", "") if request.tool_call else ""
         tool_id = self._tool_id_by_name.get(tool_name)
 
-        # 名字不在治理范围内的，多数是 DeepAgents 框架内置工具（task / todo / 文件系统等），
-        # 不属于用户工具治理对象 → 透传，不阻断也不审计成 deny。
+        # 名字不在治理范围内的，多数是 DeepAgents 框架内置工具（task / todo / ls /
+        # grep / read_file 等只读类）→ 透传，不阻断也不审计成 deny。注:沙盒应用下
+        # execute / write_file / edit_file 已由 source='builtin' 的 tb_tool 记录纳入
+        # name_to_id（见 agent_app._governed_builtin_metadata），会走下方正常治理。
         if tool_id is None:
             return (
                 _Decision("allow", reason=f"framework tool, not policy-governed: {tool_name}"),

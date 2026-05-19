@@ -16,6 +16,8 @@ class BuiltinToolResp(BaseModel):
     tool_name: str
     description: str
     parameters: dict
+    # 分组标签,前端按此分段展示(文件 / 沙盒 / 记忆 / 桌面操控 等)
+    group: str = "其他"
 
 
 # ── MCP Server ──

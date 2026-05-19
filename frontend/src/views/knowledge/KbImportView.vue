@@ -29,13 +29,18 @@
       </a-upload-dragger>
 
       <a-form layout="vertical" class="form">
-        <a-form-item label="分类标签（可选）">
-          <a-input
-            v-model:value="category"
-            placeholder="如 告警处置手册、操作指南"
+        <a-form-item label="目标分类">
+          <a-tree-select
+            v-model:value="categoryId"
+            :tree-data="categoryTreeData"
             :disabled="uploading"
+            tree-default-expand-all
+            placeholder="选择分类"
+            style="width: 100%"
           />
-          <div class="form-hint">用于前端按分类筛选；不影响 RAGFlow 解析</div>
+          <div class="form-hint">
+            分类仅用于 easy-ai 侧组织与筛选；不影响 RAGFlow 解析
+          </div>
         </a-form-item>
       </a-form>
 
@@ -70,7 +75,7 @@ import { ArrowLeftOutlined, InboxOutlined } from "@ant-design/icons-vue";
 import { message } from "ant-design-vue";
 import type { UploadFile, UploadProps } from "ant-design-vue";
 import * as kbApi from "@/api/kb";
-import type { KbResp } from "@/api/types";
+import type { KbCategoryNode, KbResp } from "@/api/types";
 
 const router = useRouter();
 const route = useRoute();
@@ -78,7 +83,26 @@ const kbId = computed(() => String(route.params.id));
 const kb = ref<KbResp | null>(null);
 
 const fileList = ref<UploadFile[]>([]);
-const category = ref("");
+// "0" = 未分类;可由详情页跳转时带 ?category_id= 预选
+const categoryId = ref<string>(
+  route.query.category_id ? String(route.query.category_id) : "0",
+);
+type TreeSelectNode = { value: string; title: string };
+const categoryTreeData = ref<TreeSelectNode[]>([
+  { value: "0", title: "未分类" },
+]);
+// 单层扁平: 即便后端给出历史嵌套数据也拍平
+function toTreeSelect(nodes: KbCategoryNode[]): TreeSelectNode[] {
+  const out: TreeSelectNode[] = [];
+  const walk = (ns: KbCategoryNode[]) => {
+    for (const n of ns) {
+      out.push({ value: n.id, title: n.name });
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
+}
 const uploading = ref(false);
 const lastResult = ref<{ success: boolean; message: string } | null>(null);
 
@@ -109,7 +133,7 @@ async function onSubmit() {
     const { data } = await kbApi.uploadKbDocuments(
       kbId.value,
       rawFiles,
-      category.value.trim() || undefined,
+      categoryId.value || "0",
     );
     const n = data.data.length;
     lastResult.value = {
@@ -131,6 +155,15 @@ async function onSubmit() {
 onMounted(async () => {
   const { data } = await kbApi.getKb(kbId.value);
   kb.value = data.data;
+  try {
+    const { data: tree } = await kbApi.getKbCategoryTree(kbId.value);
+    categoryTreeData.value = [
+      { value: "0", title: "未分类" },
+      ...toTreeSelect(tree.data),
+    ];
+  } catch {
+    /* 分类树拉取失败时仅保留"未分类" */
+  }
 });
 </script>
 

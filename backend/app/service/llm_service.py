@@ -201,9 +201,7 @@ class LlmService:
         entity = db.get(TbLlmProvider, provider_id)
         if not entity:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, "provider not found")
-        models = db.scalars(
-            select(TbLlmModel).where(TbLlmModel.provider_id == provider_id)
-        ).all()
+        models = db.scalars(select(TbLlmModel).where(TbLlmModel.provider_id == provider_id)).all()
         provider_type = entity.provider_type
         model_snapshots = [(m.model, m.model_type) for m in models]
         db.query(TbLlmModel).filter(TbLlmModel.provider_id == provider_id).delete()
@@ -473,9 +471,7 @@ class LlmService:
                 model_type=model_type,
             )
 
-    def resync_model(
-        self, db: Session, model_id: int, req_ctx: RequestContext
-    ) -> LlmModelResp:
+    def resync_model(self, db: Session, model_id: int, req_ctx: RequestContext) -> LlmModelResp:
         """手动触发把当前模型重新推到 RAGFlow,失败抛出。"""
         entity = db.get(TbLlmModel, model_id)
         if not entity:

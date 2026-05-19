@@ -1,0 +1,30 @@
+# OpenSandbox lifecycle server 配置模板。容器启动时会读取 .env 的
+# SANDBOX_API_KEY:非空 → 替换占位符为真实 key 并启用鉴权;为空 → 该行整
+# 行删除 + 配合 OPENSANDBOX_INSECURE_SERVER=YES 走本地不鉴权模式。
+# 详见 docs/sandbox-design.md §7。
+
+[server]
+host = "0.0.0.0"
+port = 8090
+api_key = "__API_KEY_PLACEHOLDER__"
+
+[log]
+level = "INFO"
+
+[runtime]
+type = "docker"
+execd_image = "opensandbox/execd:v1.0.17"
+
+[egress]
+image = "opensandbox/egress:v1.0.12"
+
+[docker]
+# 把 sandbox 容器接到与 server 同一张 compose 网络(deploy/docker-compose.yml
+# 里固定名 easy-ai-sandbox),server 才能直连 sandbox 的 execd。
+network_mode = "easy-ai-sandbox"
+drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+no_new_privileges = true
+pids_limit = 4096
+
+[ingress]
+mode = "direct"

@@ -211,4 +211,8 @@ class UserService:
         if not user or not verify_password(req.passwd, user.passwd):
             raise ServiceError(ErrorCode.UNAUTHORIZED, "account or password invalid")
         token = create_access_token(user.id)
-        return UserLoginResp(access_token=token, user=UserResp.from_entity(user))
+        role_map = self._load_user_roles(db, [user.id])
+        return UserLoginResp(
+            access_token=token,
+            user=UserResp.from_entity(user, role_map.get(user.id)),
+        )

@@ -2,6 +2,8 @@ import request from "./request";
 import type {
   ApiPageResp,
   ApiResp,
+  KbCategoryDeletePreview,
+  KbCategoryNode,
   KbChunkResp,
   KbDocumentResp,
   KbOption,
@@ -81,7 +83,8 @@ export function pageKbDocuments(
     page_no: number;
     page_size: number;
     keyword?: string;
-    category?: string;
+    category_id?: string;
+    recursive?: boolean;
     parse_status?: string;
   },
 ) {
@@ -91,14 +94,70 @@ export function pageKbDocuments(
   );
 }
 
-export function uploadKbDocuments(kbId: string, files: File[], category?: string) {
+export function uploadKbDocuments(
+  kbId: string,
+  files: File[],
+  categoryId = "0",
+) {
   const form = new FormData();
   for (const f of files) form.append("files", f);
-  if (category) form.append("category", category);
+  form.append("category_id", categoryId);
   return request.post<ApiResp<KbDocumentResp[]>>(
     `/api/v1/kb/${kbId}/document`,
     form,
     { headers: { "Content-Type": "multipart/form-data" } },
+  );
+}
+
+export function moveKbDocuments(
+  kbId: string,
+  ids: string[],
+  categoryId: string,
+) {
+  return request.put<ApiResp<number>>(`/api/v1/kb/${kbId}/document/move`, {
+    ids,
+    category_id: categoryId,
+  });
+}
+
+// ── Category(树形, 单归属)────────────────────────────────────────────
+
+export function getKbCategoryTree(kbId: string) {
+  return request.get<ApiResp<KbCategoryNode[]>>(
+    `/api/v1/kb/${kbId}/category/tree`,
+  );
+}
+
+export function createKbCategory(
+  kbId: string,
+  body: { name: string; parent_id?: string },
+) {
+  return request.post<ApiResp<KbCategoryNode>>(
+    `/api/v1/kb/${kbId}/category`,
+    body,
+  );
+}
+
+export function updateKbCategory(
+  kbId: string,
+  catId: string,
+  body: { name?: string; parent_id?: string; sort?: number },
+) {
+  return request.put<ApiResp<KbCategoryNode>>(
+    `/api/v1/kb/${kbId}/category/${catId}`,
+    body,
+  );
+}
+
+// confirm=false 时为 dry-run, 返回影响面不删除
+export function deleteKbCategory(
+  kbId: string,
+  catId: string,
+  confirm: boolean,
+) {
+  return request.delete<ApiResp<KbCategoryDeletePreview>>(
+    `/api/v1/kb/${kbId}/category/${catId}`,
+    { params: { confirm } },
   );
 }
 

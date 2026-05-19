@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.app.app_runtime import AppRuntime
 from app.app.backend_factory import BackendFactory
 from app.app.checkpointer_factory import CheckpointerFactory, get_checkpointer_factory
+from app.app.computer_tools import build_computer_tools
 from app.app.langchain_util import LangChainUtil
 from app.app.memory_middleware import MemoryInjectionMiddleware
 from app.app.memory_tools import build_memory_tools
@@ -46,7 +47,9 @@ from app.model.open_model import AgentRunRequest
 from app.service.app_log_service import ZERO_USAGE, AppLogService
 from app.service.memory_service import MemoryService
 from app.service.policy_service import PolicyAuditWriter
+from app.service.sandbox_image_service import SandboxImageService
 from app.service.skill_service import RESERVED_SKILL_NAMES
+from app.service.tool_service import BUILTIN_SOURCE
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +165,7 @@ class _Prepared:
     runtime_config: Any
     app_config: dict[str, Any]
     agent: Any
+    backend: Any
     payload: dict[str, Any]
     observation_metadata: dict[str, Any]
     thread_id: str | None
@@ -198,6 +202,28 @@ class AgentApp:
         )
         self._backend_factory = backend_factory or BackendFactory()
         self._checkpointer_factory = checkpointer_factory or get_checkpointer_factory()
+
+    def _release_ephemeral_sandbox(self, prep: _Prepared) -> None:
+        """一次性(非 checkpoint)会话跑完即回收沙盒。
+
+        checkpoint 会话的沙盒寿命 = checkpoint 寿命,跨轮次/HITL 复用同一沙盒,
+        由 _delete_checkpoint_thread → purge_hook 统一回收,这里不碰。HITL 暂停
+        只发生在 checkpoint 会话(_collect_pending_hitl 的前置条件),所以非
+        checkpoint 路径在此释放不会误伤待续跑的沙盒。详见 docs/sandbox-design.md §4.2。
+        """
+        if prep.use_checkpoint:
+            return
+        from deepagents.backends.protocol import SandboxBackendProtocol
+
+        backend = prep.backend
+        if not isinstance(backend, SandboxBackendProtocol):
+            return
+        try:
+            from app.app.sandbox import get_sandbox_registry
+
+            get_sandbox_registry().release(backend.id)
+        except Exception:
+            logger.exception("[sandbox] ephemeral release failed")
 
     async def run(
         self,
@@ -256,6 +282,8 @@ class AgentApp:
                 token_usage=dict(ZERO_USAGE),
             )
             raise
+        finally:
+            self._release_ephemeral_sandbox(prep)
 
     async def stream(
         self,
@@ -535,6 +563,7 @@ class AgentApp:
                 error_message=error_message,
                 token_usage=token_usage,
             )
+            self._release_ephemeral_sandbox(prep)
 
     def _prepare(
         self,
@@ -573,10 +602,45 @@ class AgentApp:
         if memory_tools:
             tools = list(tools) + memory_tools
         system_prompt = (app_config.get("system_prompt") or "").strip()
-        backend = self._backend_factory.create(app_config)
+        # 沙盒后端:把 app 选的镜像(app_config.sandbox.image_id)解析成实际镜像,
+        # 注入 app_config 供 registry 建沙盒时用(不持久化,仅本次运行态的 dict)。
+        # state 后端不会用到,跳过 DB 查询。详见 docs/sandbox-design.md §7。
+        runtime_backend = str(app_config.get("runtime_backend") or "state").lower()
+        is_sandbox = runtime_backend in ("opensandbox", "composite")
+        # 沙盒后端才把框架内置写/执行工具(execute / write_file / edit_file)纳入
+        # PolicyMiddleware 治理;state 后端维持原透传行为,不引入新的 HITL 打扰。
+        # 详见 docs/sandbox-design.md §5。
+        builtin_meta: dict[str, Any] = {}
+        if is_sandbox:
+            resolved = SandboxImageService(
+                SnowflakeGenerator(settings.snowflake_worker_id)
+            ).resolve_image(db, app_config)
+            if resolved:
+                app_config.setdefault("sandbox", {})
+                app_config["sandbox"]["image"] = resolved["image"]
+                res = {
+                    k: v for k, v in (("cpu", resolved["cpu"]), ("memory", resolved["memory"])) if v
+                }
+                if res:
+                    app_config["sandbox"].setdefault("resources", res)
+            builtin_meta = self._governed_builtin_metadata(db)
+            self._merge_builtin_metadata(tool_metadata, builtin_meta)
+            # Tier 3 computer-use:app 显式开 sandbox.computer_use 才挂桌面操控工具。
+            # 这些工具以 source='builtin' 种入 tb_tool(迁移 0017),已被上面的
+            # _governed_builtin_metadata 一并纳入治理(写类高危走 HITL)。
+            if (app_config.get("sandbox") or {}).get("computer_use"):
+                computer_tools = build_computer_tools(
+                    session_key=req.thread_id, langchain_util=self._langchain_util
+                )
+                if computer_tools:
+                    tools = list(tools) + computer_tools
+                    logger.info("[computer-use] tools wired count=%d", len(computer_tools))
+        # 沙盒后端按 thread_id 复用(跨 HITL 中断/恢复),详见 docs/sandbox-design.md §4.2。
+        # state 后端忽略 session_key。
+        backend = self._backend_factory.create(app_config, session_key=req.thread_id)
 
         skill_subagents = self._build_skill_subagents(
-            db, app.id, model=model, req=req, req_ctx=req_ctx
+            db, app.id, model=model, req=req, req_ctx=req_ctx, governed_builtins=builtin_meta
         )
         extra_subagents = app_config.get("sub_agents")
         all_subagents: list[Any] = list(skill_subagents)
@@ -635,6 +699,7 @@ class AgentApp:
             runtime_config=runtime_config,
             app_config=app_config,
             agent=agent,
+            backend=backend,
             payload=payload,
             observation_metadata=observation_metadata,
             thread_id=req.thread_id,
@@ -719,6 +784,7 @@ class AgentApp:
         model: Any,
         req: AgentRunRequest,
         req_ctx: RequestContext,
+        governed_builtins: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """每个 enabled 绑定技能渲染成一个 SubAgent 规格。
 
@@ -753,6 +819,9 @@ class AgentApp:
                     seen.add(row.tool_id)
                     tool_ids.append(row.tool_id)
             skill_tools, skill_tool_metadata = self._load_tools_with_metadata(db, tool_ids)
+            # 沙盒应用下,技能 subagent 也可能调用 execute 等内置工具,纳入同等治理。
+            if governed_builtins and governed_builtins.get("name_to_id"):
+                self._merge_builtin_metadata(skill_tool_metadata, governed_builtins)
             description = (skill.description or skill.name).strip()
             if len(description) > 1024:
                 description = description[:1024]
@@ -804,6 +873,40 @@ class AgentApp:
                 "id_to_hitl_timeout": id_to_timeout,
             },
         )
+
+    def _governed_builtin_metadata(self, db: Session) -> dict[str, Any]:
+        """source='builtin' 工具(execute / write_file / edit_file ...)的治理元数据。
+
+        这些是 deepagents FilesystemMiddleware 注入的框架工具,本系统不构造
+        tool 对象,只把 name→id / risk / hitl 喂给 PolicyMiddleware,让它按统一
+        ACL+HITL+审计治理。仅沙盒后端调用。详见 docs/sandbox-design.md §5。
+        """
+        name_to_id: dict[str, int] = {}
+        id_to_risk: dict[int, str] = {}
+        id_to_timeout: dict[int, int | None] = {}
+        rows = db.scalars(
+            select(TbTool).where(
+                TbTool.source == BUILTIN_SOURCE,
+                TbTool.tool_status == "enabled",
+            )
+        ).all()
+        for tool in rows:
+            name_to_id.setdefault(tool.tool_name, tool.id)
+            id_to_risk[tool.id] = (tool.risk_level or "low").lower()
+            id_to_timeout[tool.id] = tool.hitl_timeout_seconds
+        return {
+            "name_to_id": name_to_id,
+            "id_to_risk": id_to_risk,
+            "id_to_hitl_timeout": id_to_timeout,
+        }
+
+    @staticmethod
+    def _merge_builtin_metadata(base: dict[str, Any], builtin: dict[str, Any]) -> None:
+        """把 builtin 治理元数据并入 base;同名已绑定工具优先,不被覆盖。"""
+        for name, tid in builtin["name_to_id"].items():
+            base["name_to_id"].setdefault(name, tid)
+        base["id_to_risk"].update(builtin["id_to_risk"])
+        base["id_to_hitl_timeout"].update(builtin["id_to_hitl_timeout"])
 
     async def _collect_pending_hitl(self, prep: _Prepared) -> list[dict[str, Any]]:
         """从 LangGraph state.tasks 提取 PolicyMiddleware 写下的 tool_hitl_required 载荷。

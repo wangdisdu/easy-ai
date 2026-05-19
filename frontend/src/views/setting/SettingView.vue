@@ -17,6 +17,12 @@
       <a-tab-pane v-if="canSetting" key="category" tab="分类管理">
         <CategoryManageView />
       </a-tab-pane>
+      <a-tab-pane v-if="canSetting" key="sandbox" tab="沙盒管理">
+        <SandboxManageView />
+      </a-tab-pane>
+      <a-tab-pane v-if="canSetting" key="sandbox-instance" tab="沙盒实例">
+        <SandboxInstanceView />
+      </a-tab-pane>
     </a-tabs>
   </div>
 </template>
@@ -26,18 +32,20 @@ import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import LlmManageView from "@/views/setting/LlmManageView.vue";
 import CategoryManageView from "@/views/setting/CategoryManageView.vue";
+import SandboxManageView from "@/views/setting/SandboxManageView.vue";
+import SandboxInstanceView from "@/views/setting/SandboxInstanceView.vue";
 import AiInfraView from "@/views/setting/AiInfraView.vue";
 import { useAuthStore } from "@/stores/auth";
 import { PERM } from "@/utils/permission";
 
-type TabKey = "llm" | "ai-infra" | "category";
+type TabKey = "llm" | "ai-infra" | "category" | "sandbox" | "sandbox-instance";
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const canLlm = computed(() => auth.hasPermission(PERM.SYSTEM_LLM));
 const canSetting = computed(() => auth.hasPermission(PERM.SYSTEM_SETTING));
-const tabKeys: TabKey[] = ["llm", "ai-infra", "category"];
+const tabKeys: TabKey[] = ["llm", "ai-infra", "category", "sandbox", "sandbox-instance"];
 
 const activeTab = computed<TabKey>(() => {
   const tab = route.query.tab;
