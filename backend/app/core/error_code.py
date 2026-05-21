@@ -16,3 +16,12 @@ class ErrorCode:
     KB_EMBEDDING_MISMATCH = 1203
     # 创建 KB 时未指定 embedding,且系统设置里也没有默认 embedding
     KB_EMBEDDING_NOT_CONFIGURED = 1204
+
+    # 应用集成管理 API(对外网关错误走 IntegrationApiError,不在此处)
+    # 详见 docs/application-integration-design.md §12.1
+    INTEGRATION_NOT_FOUND = 1300
+    INTEGRATION_NAME_DUPLICATE = 1301
+    # 绑定了 P1 未支持的应用类型(agent_flow / kb_push)
+    INTEGRATION_BIND_NOT_ALLOWED = 1302
+    # 客户端尝试获取已不可见的 API Key 明文
+    API_KEY_PLAINTEXT_INVISIBLE = 1303

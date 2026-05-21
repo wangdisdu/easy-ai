@@ -12,6 +12,7 @@ from app.app.hitl_timeout_worker import HitlTimeoutWorker
 from app.app.kb_status_poller import KbStatusPoller
 from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
+from app.core.rate_limit import MemoryRateLimiter
 from app.integration import ragflow_client
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """FastAPI 生命周期：启动期初始化共享资源，关闭期释放。"""
     # 默认 admin 种子保留原行为。
     ensure_default_admin()
+
+    # 应用集成限流器(P0 单机内存,详见 docs/application-integration-design.md §9)
+    limiter = MemoryRateLimiter()
+    await limiter.start_janitor()
+    _app.state.limiter = limiter
 
     factory = get_checkpointer_factory()
     await factory.start()
@@ -55,6 +61,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await hitl_worker.stop()
         if purger is not None:
             await purger.stop()
+        await limiter.stop_janitor()
         # 关闭 ragflow httpx 连接池
         ragflow_client.close_client()
         await factory.close()

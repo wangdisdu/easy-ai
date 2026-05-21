@@ -62,6 +62,27 @@ const router = createRouter({
           component: () => import("@/views/app/AppFormView.vue"),
         },
         {
+          path: "integration",
+          name: "integration",
+          meta: {
+            title: "应用集成",
+            menu: { title: "应用集成", icon: "api", order: 2.5 },
+          },
+          component: () => import("@/views/integration/IntegrationListView.vue"),
+        },
+        {
+          path: "integration/create",
+          name: "integration-create",
+          meta: { title: "创建集成应用" },
+          component: () => import("@/views/integration/IntegrationFormView.vue"),
+        },
+        {
+          path: "integration/:id/edit",
+          name: "integration-edit",
+          meta: { title: "编辑集成应用" },
+          component: () => import("@/views/integration/IntegrationFormView.vue"),
+        },
+        {
           path: "skill",
           name: "skill",
           meta: {

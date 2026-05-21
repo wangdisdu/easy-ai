@@ -503,6 +503,49 @@ export interface SandboxInstanceResp {
   metadata?: Record<string, string>;
 }
 
+// ── 应用集成 (详见 docs/application-integration-design.md) ──
+
+export interface BoundAppItem {
+  app_type: string;
+  app_id: string;
+}
+
+export interface IntegrationKeyResp {
+  id: string;
+  integration_id: string;
+  masked: string;
+  status: string;
+  rate_limit: number | null;
+  last_used_at: number | null;
+  create_time: number;
+}
+
+export interface IntegrationKeyPlaintextResp {
+  key: IntegrationKeyResp;
+  plaintext: string;
+}
+
+export interface IntegrationResp {
+  id: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  quota: number | null;
+  rate_limit: number | null;
+  timeout: number | null;
+  whitelist?: string | null;
+  expire_at?: number | null;
+  create_time: number;
+  update_time: number;
+  bound_apps: BoundAppItem[];
+  keys: IntegrationKeyResp[];
+}
+
+export interface IntegrationCreateResp {
+  integration: IntegrationResp;
+  first_key: IntegrationKeyPlaintextResp | null;
+}
+
 export interface SandboxImageResp {
   id: string;
   name: string;

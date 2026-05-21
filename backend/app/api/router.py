@@ -4,6 +4,7 @@ from app.api.app_api import router as app_router
 from app.api.app_category_api import router as app_category_router
 from app.api.auth_api import router as auth_router
 from app.api.conversation_api import router as conversation_router
+from app.api.integration_api import router as integration_router
 from app.api.kb_api import router as kb_router
 from app.api.kb_category_api import router as kb_category_router
 from app.api.kb_document_api import router as kb_document_router
@@ -47,6 +48,7 @@ api_router.include_router(observability_router, dependencies=_login_required)
 api_router.include_router(conversation_router, dependencies=_login_required)
 api_router.include_router(memory_router, dependencies=_login_required)
 api_router.include_router(system_setting_router, dependencies=_login_required)
+api_router.include_router(integration_router, dependencies=_login_required)
 api_router.include_router(sandbox_image_router, dependencies=_login_required)
 api_router.include_router(sandbox_instance_router, dependencies=_login_required)
 api_router.include_router(sandbox_view_router, dependencies=_login_required)

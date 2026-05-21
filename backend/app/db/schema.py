@@ -1,4 +1,13 @@
-from sqlalchemy import BigInteger, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Float,
+    Index,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -598,3 +607,121 @@ class TbSandboxImage(Base):
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbIntegration(Base):
+    """应用集成主表。
+
+    对外开放 AI 能力的网关元数据。`status` 仅 active/disabled 两态;
+    `quota` / `rate_limit` / `timeout` 三态:NULL=继承全局默认,0=不限,>0=具体值。
+    详见 docs/application-integration-design.md §3.1。
+    """
+
+    __tablename__ = "tb_integration"
+    __table_args__ = (
+        UniqueConstraint("name", name="uk_tb_integration_name"),
+        Index("idx_tb_integration_status", "status", "deleted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    quota: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timeout: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    whitelist: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expire_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    deleted_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbIntegrationKey(Base):
+    """集成 API Key。
+
+    `key_hash` = SHA-256(plaintext),全局唯一,不存明文;`key_prefix`+`key_suffix`
+    用于列表显示拼出 `sk-prod-9f3****xY2k`。`rate_limit` NULL=继承 Integration 级。
+    """
+
+    __tablename__ = "tb_integration_key"
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uk_tb_integration_key_hash"),
+        Index("idx_tb_integration_key_intg", "integration_id", "deleted_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    integration_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
+    key_suffix: Mapped[str] = mapped_column(String(16), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    rate_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_used_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    revoked_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    deleted_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbIntegrationApp(Base):
+    """集成与应用的绑定关系。
+
+    `app_type` 进主键以避免跨表 ID 冲突:P1 的 kb_push 指向 tb_knowledge_base 而非 tb_app。
+    """
+
+    __tablename__ = "tb_integration_app"
+    __table_args__ = (
+        PrimaryKeyConstraint("integration_id", "app_type", "app_id", name="pk_tb_integration_app"),
+        Index("idx_tb_integration_app_lookup", "app_type", "app_id"),
+    )
+
+    integration_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    app_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    app_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class TbIntegrationQuotaDay(Base):
+    """日配额计数持久化。
+
+    内存限流的 day_count 每分钟批量 UPSERT 到此表;进程重启后从此表 hydrate,
+    避免重启清零让调用方"满血复活"。精度损失 ≤ 1 分钟。
+    """
+
+    __tablename__ = "tb_integration_quota_day"
+    __table_args__ = (
+        PrimaryKeyConstraint("integration_id", "day", name="pk_tb_integration_quota_day"),
+    )
+
+    integration_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    day: Mapped[str] = mapped_column(String(8), nullable=False)
+    day_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class TbApiAccessLog(Base):
+    """对外网关 /open/v1/* 调用日志。
+
+    每次调用落一行,无论成功、鉴权拒绝、限流拒绝还是上游错误。鉴权失败发生在
+    解析集成之前时,integration_id/key_id/app_* 列可能为空。
+    """
+
+    __tablename__ = "tb_api_access_log"
+    __table_args__ = (Index("idx_tb_api_access_log_intg", "integration_id", "create_time"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    integration_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    key_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    app_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    app_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    request_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)

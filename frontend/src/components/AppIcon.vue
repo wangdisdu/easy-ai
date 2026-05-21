@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
-  name: "appstore" | "bulb" | "cluster" | "database" | "eye" | "robot" | "safety" | "setting" | "tool";
+  name: "api" | "appstore" | "bulb" | "cluster" | "database" | "eye" | "robot" | "safety" | "setting" | "tool";
   size?: number;
 }>(), {
   size: 18,
@@ -111,6 +111,23 @@ const props = withDefaults(defineProps<{
     aria-hidden="true"
   >
     <path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7 4 4 0 0 1 1.4 3v.3h5.2v-.3a4 4 0 0 1 1.4-3A7 7 0 0 0 12 2z"/>
+  </svg>
+
+  <svg
+    v-else-if="props.name === 'api'"
+    :width="props.size"
+    :height="props.size"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M14 7h7M7 17h-3M4 12h6"/>
+    <circle cx="14" cy="12" r="3"/>
+    <path d="M14 9V5M14 19v-4M11 12H7"/>
   </svg>
 
   <svg
