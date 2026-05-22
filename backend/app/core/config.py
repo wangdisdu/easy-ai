@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     ragflow_timeout_sec: float = Field(default=30.0)
     # 后台 poller: 扫 pending/parsing 文档与 RAGFlow 对账的间隔(秒)
     kb_status_poll_interval_seconds: int = Field(default=30)
+    # 知识库文档原文 blob 存储根目录(easy-ai 为文档真相源)
+    kb_storage_path: str = Field(default="./data/kb_storage")
 
 
 settings = Settings()

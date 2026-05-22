@@ -52,12 +52,12 @@ from app.core.sse import (
     new_run_id,
 )
 from app.db.session import SessionLocal
-from app.model.kb_model import KbRetrieveHit, KbRetrieveReq
 from app.model.open_model import (
     LiteLLMChatRequest,
     ModelGatewayChatMessage,
     RagRunRequest,
 )
+from app.model.rag_dataset_model import RetrieveHit, RetrieveReq
 from app.service.kb_retrieve_service import KbRetrieveService
 from app.service.model_gateway_service import ModelGatewayService
 
@@ -399,15 +399,21 @@ class RagApp:
 
     @staticmethod
     def _extract_kb_ids(app_config: dict[str, Any]) -> list[str]:
-        raw = app_config.get("kb_ids") or app_config.get("kbIds")
+        # v2: RAG 应用检索面向 RAG 库; 兼容旧 kb_ids 键(P4 统一改造命名)
+        raw = (
+            app_config.get("dataset_ids")
+            or app_config.get("datasetIds")
+            or app_config.get("kb_ids")
+            or app_config.get("kbIds")
+        )
         if not isinstance(raw, list):
             return []
         return [str(x) for x in raw if x]
 
     @staticmethod
     def _build_retrieve_req(
-        app_config: dict[str, Any], kb_ids: list[str], query: str
-    ) -> KbRetrieveReq:
+        app_config: dict[str, Any], dataset_ids: list[str], query: str
+    ) -> RetrieveReq:
         # UI 字段名:top_n / vector_weight / enable_rerank + rerank_model
         # 兼容旧字段:top_k / rerank_id
         rerank_id = None
@@ -415,8 +421,8 @@ class RagApp:
             rerank_id = app_config.get("rerank_model") or app_config.get("rerank_id") or None
         elif app_config.get("rerank_id"):
             rerank_id = app_config.get("rerank_id")
-        return KbRetrieveReq(
-            kb_ids=kb_ids,
+        return RetrieveReq(
+            dataset_ids=dataset_ids,
             question=query,
             top_k=int(app_config.get("top_n") or app_config.get("top_k") or 5),
             similarity_threshold=float(app_config.get("similarity_threshold") or 0.2),
@@ -430,7 +436,7 @@ class RagApp:
         self,
         db: Session,
         app_config: dict[str, Any],
-        hits: list[KbRetrieveHit],
+        hits: list[RetrieveHit],
         query: str,
         req_ctx: RequestContext,
         request_type: str,
@@ -490,7 +496,7 @@ class RagApp:
         return rendered
 
     @staticmethod
-    def _format_context(hits: list[KbRetrieveHit]) -> str:
+    def _format_context(hits: list[RetrieveHit]) -> str:
         parts: list[str] = []
         for i, hit in enumerate(hits, start=1):
             ref = hit.doc_ref or "?"
@@ -521,7 +527,7 @@ class RagApp:
         return ""
 
     @staticmethod
-    def _hit_to_reference(hit: KbRetrieveHit) -> dict[str, Any]:
+    def _hit_to_reference(hit: RetrieveHit) -> dict[str, Any]:
         snippet = (hit.content or "").strip()
         if len(snippet) > 300:
             snippet = snippet[:300] + "..."

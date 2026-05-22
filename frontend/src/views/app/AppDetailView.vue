@@ -580,7 +580,7 @@
                 app?.app_type === 'agent'
                   ? '输入消息开始与 Agent 对话'
                   : app?.app_type === 'rag'
-                    ? '输入问题,从绑定的知识库检索 + 生成答案'
+                    ? '输入问题,从绑定的 RAG 库检索 + 生成答案'
                     : '填写输入变量后点击运行'
               }}
             </div>
@@ -943,7 +943,7 @@ const requestTypeLabel: Record<string, string> = {
 };
 
 const typeConfigTitle: Record<string, string> = {
-  rag: "知识库、检索、Rerank 与总结配置。",
+  rag: "RAG 库、检索、Rerank 与总结配置。",
   llm: "输入变量、提示词模板与输出配置。",
   nl2sql: "数据库连接与 Schema 描述。",
   agent: "工具、技能、行为参数与子智能体配置。",
@@ -982,7 +982,13 @@ const summaryRows = computed(() => {
   }
   if (app.value.app_type === "rag") {
     return [
-      { label: "知识库", value: ((config.kb_ids as string[]) || []).join(", ") || "-" },
+      {
+        label: "RAG 库",
+        value:
+          ((config.dataset_ids as string[]) || (config.kb_ids as string[]) || []).join(
+            ", ",
+          ) || "-",
+      },
       { label: "相似度阈值", value: String(config.similarity_threshold ?? "-") },
       { label: "Top N", value: String(config.top_n ?? "-") },
       { label: "Rerank", value: config.enable_rerank ? "已启用" : "未启用" },

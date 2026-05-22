@@ -10,8 +10,8 @@ from app.app.alert_rule_worker import AlertRuleWorker
 from app.app.checkpoint_purger import CheckpointPurger
 from app.app.checkpointer_factory import get_checkpointer_factory
 from app.app.hitl_timeout_worker import HitlTimeoutWorker
-from app.app.kb_status_poller import KbStatusPoller
 from app.app.metric_rollup_worker import MetricRollupWorker
+from app.app.vectorization_worker import VectorizationWorker
 from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
 from app.core.rate_limit import MemoryRateLimiter
@@ -48,12 +48,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     )
     await hitl_worker.start()
 
-    kb_poller: KbStatusPoller | None = None
+    vectorize_worker: VectorizationWorker | None = None
     if settings.ragflow_enabled:
-        kb_poller = KbStatusPoller(
+        vectorize_worker = VectorizationWorker(
             interval_seconds=settings.kb_status_poll_interval_seconds,
         )
-        await kb_poller.start()
+        await vectorize_worker.start()
 
     alert_worker: AlertRuleWorker | None = None
     if settings.alert_eval_enabled:
@@ -77,8 +77,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await metric_rollup_worker.stop()
         if alert_worker is not None:
             await alert_worker.stop()
-        if kb_poller is not None:
-            await kb_poller.stop()
+        if vectorize_worker is not None:
+            await vectorize_worker.stop()
         await hitl_worker.stop()
         if purger is not None:
             await purger.stop()

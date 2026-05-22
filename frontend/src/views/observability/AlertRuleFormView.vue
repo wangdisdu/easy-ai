@@ -1,7 +1,7 @@
 <template>
   <section class="alert-form-page">
     <div class="form-header">
-      <a-button type="text" @click="router.push('/observability/alert-rule')">
+      <a-button type="text" @click="router.push({ path: '/observability', query: { tab: 'alert-rule' } })">
         <template #icon><ArrowLeftOutlined /></template>
         返回
       </a-button>
@@ -133,7 +133,7 @@
     </div>
 
     <div class="form-actions">
-      <a-button @click="router.push('/observability/alert-rule')">取消</a-button>
+      <a-button @click="router.push({ path: '/observability', query: { tab: 'alert-rule' } })">取消</a-button>
       <a-button type="primary" :loading="submitting" @click="onSubmit">
         {{ isEdit ? "保存" : "创建" }}
       </a-button>
@@ -245,7 +245,7 @@ async function onSubmit() {
       await alertApi.createAlertRule(body);
       message.success("规则已创建");
     }
-    router.push("/observability/alert-rule");
+    router.push({ path: "/observability", query: { tab: "alert-rule" } });
   } finally {
     submitting.value = false;
   }

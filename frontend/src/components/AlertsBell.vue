@@ -73,7 +73,7 @@ async function load() {
 
 function goAlerts() {
   open.value = false;
-  router.push("/observability/alert");
+  router.push({ path: "/observability", query: { tab: "alert" } });
 }
 
 onMounted(() => {

@@ -478,7 +478,8 @@ class TbMemoryAudit(Base):
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
-# ── 知识库（RAGFlow Dataset 1:1 映射, 详见 docs/knowledge-rag-integration-design.md §4）──
+# ── 知识库(v2 纯组织层, 详见 docs/knowledge-v2-design.md)──
+# 向量化字段(embedding/chunk/ragflow_dataset 等)已迁至 tb_rag_dataset。
 class TbKb(Base):
     __tablename__ = "tb_kb"
     __table_args__ = (UniqueConstraint("code", name="uk_tb_kb_code"),)
@@ -487,20 +488,6 @@ class TbKb(Base):
     code: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 对应 RAGFlow Dataset ID; 创建中或解绑后为空
-    ragflow_dataset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # 落库时间点的 embedding 模型(RAGFlow 不允许 in-place 切换, 变更必须重建 dataset)
-    embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
-    # naive / qa / manual / book / table / laws, 对齐 RAGFlow chunk_method
-    chunk_method: Mapped[str] = mapped_column(String(64), nullable=False)
-    # RAGFlow parser_config; 按 chunk_method 不同 schema 不同, 存 JSON 字符串
-    parser_config: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # 缓存值, 由后台 poller 定时回填
-    doc_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # draft / ready / syncing / error
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
-    last_synced_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -517,9 +504,8 @@ class TbKbDocument(Base):
     # PDF / DOCX / XLSX / MD / TXT / CSV / JSON / IMG / API / DB
     format: Mapped[str] = mapped_column(String(32), nullable=False)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    # 业务分类标签(旧, 字符串)。已被 category_id 取代, 下个迭代删列;
-    # 现阶段保留只读, 新写入只更新 category_id。
-    category: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # easy-ai blob 存储相对路径; easy-ai 为文档真相源, 原文存此
+    storage_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # 树形分类节点 id(tb_kb_category.id); 0 = 未分类(直挂知识库根)。
     # 纯 easy-ai 侧元数据, 不参与 RAGFlow 建模。
     category_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -528,8 +514,10 @@ class TbKbDocument(Base):
     # connector 私有字段(filePath / sourceUrl / syncSchedule 等), JSON 字符串
     source_meta: Mapped[str | None] = mapped_column(Text, nullable=True)
     ragflow_doc_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # pending / parsing / done / error / cancelled, 对齐 RAGFlow run state
-    parse_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    # 文档所属 RAG 库(tb_rag_dataset.id); 由分类映射推导固化, 未映射时为空
+    rag_dataset_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # not_mapped / pending / parsing / done / error —— 向量化(RAGFlow 侧)状态
+    vectorize_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_mapped")
     chunks_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 解析进度元数据,由 _sync_doc_status 从 RAGFlow document.progress/process_*
@@ -571,6 +559,74 @@ class TbKbCategory(Base):
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+# ── RAG 库(对应 RAGFlow Dataset, 持有 embedding/分块配置)──
+class TbRagDataset(Base):
+    __tablename__ = "tb_rag_dataset"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 对应 RAGFlow Dataset ID; 创建中为空
+    ragflow_dataset_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    embedding_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    # naive / qa / manual / book / table / laws, 对齐 RAGFlow chunk_method
+    chunk_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    # RAGFlow parser_config, 存 JSON 字符串
+    parser_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 缓存值, 由向量化 worker 定时回填
+    doc_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # creating / ready / syncing / error
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="creating")
+    last_synced_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+# ── 分类 → RAG 库 映射(N:1, category_id 唯一保证互斥)──
+class TbKbCategoryMapping(Base):
+    __tablename__ = "tb_kb_category_mapping"
+    __table_args__ = (UniqueConstraint("category_id", name="uk_tb_kb_category_mapping_category"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # tb_kb_category.id —— 一个分类只能映射一个 RAG 库
+    category_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rag_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # active / syncing / error
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+# ── 同步日志(知识集成 / 知识向量化)──
+class TbSyncLog(Base):
+    __tablename__ = "tb_sync_log"
+    __table_args__ = (Index("ix_tb_sync_log_type_time", "log_type", "create_time"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # integration(知识集成) / vectorization(知识向量化)
+    log_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # 来源方式: file / ones / api_pull / api_push / vectorize 等
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_kb_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    target_dataset_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    docs_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    docs_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    docs_deleted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunks_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # success / failed / partial / processing
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class TbSystemSetting(Base):

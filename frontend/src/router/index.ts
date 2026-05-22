@@ -146,19 +146,7 @@ const router = createRouter({
             menu: { title: "知识库管理", icon: "database", order: 5 },
             permissions: KB_ANY,
           },
-          component: () => import("@/views/knowledge/KbListView.vue"),
-        },
-        {
-          path: "knowledge/import/:id",
-          name: "knowledge-import",
-          meta: { title: "上传文档", permissions: [PERM.KB_EDIT] },
-          component: () => import("@/views/knowledge/KbImportView.vue"),
-        },
-        {
-          path: "knowledge/:id",
-          name: "knowledge-detail",
-          meta: { title: "知识库详情", permissions: KB_ANY },
-          component: () => import("@/views/knowledge/KbDetailView.vue"),
+          component: () => import("@/views/knowledge/KnowledgeView.vue"),
         },
         {
           path: "knowledge/:kbId/document/:docId/preview",
@@ -183,18 +171,6 @@ const router = createRouter({
             menu: { title: "可观测性", icon: "eye", order: 6 },
           },
           component: () => import("@/views/observability/ObservabilityView.vue"),
-        },
-        {
-          path: "observability/alert",
-          name: "observability-alerts",
-          meta: { title: "告警中心" },
-          component: () => import("@/views/observability/AlertCenterView.vue"),
-        },
-        {
-          path: "observability/alert-rule",
-          name: "observability-alert-rules",
-          meta: { title: "告警规则" },
-          component: () => import("@/views/observability/AlertRuleListView.vue"),
         },
         {
           path: "observability/alert-rule/create",

@@ -10,7 +10,6 @@ from app.api.integration_api import router as integration_router
 from app.api.kb_api import router as kb_router
 from app.api.kb_category_api import router as kb_category_router
 from app.api.kb_document_api import router as kb_document_router
-from app.api.kb_retrieve_api import router as kb_retrieve_router
 from app.api.llm_api import router as llm_router
 from app.api.memory_api import router as memory_router
 from app.api.observability_api import router as observability_router
@@ -18,11 +17,13 @@ from app.api.open_api import router as open_router
 from app.api.permission_api import router as permission_router
 from app.api.policy_api import policy_router
 from app.api.policy_api import router as tool_policy_router
+from app.api.rag_dataset_api import router as rag_dataset_router
 from app.api.role_api import router as role_router
 from app.api.sandbox_image_api import router as sandbox_image_router
 from app.api.sandbox_instance_api import router as sandbox_instance_router
 from app.api.sandbox_view_api import router as sandbox_view_router
 from app.api.skill_api import router as skill_router
+from app.api.sync_log_api import router as sync_log_router
 from app.api.system_setting_api import router as system_setting_router
 from app.api.tool_api import mcp_router
 from app.api.tool_api import router as tool_router
@@ -56,8 +57,8 @@ api_router.include_router(integration_router, dependencies=_login_required)
 api_router.include_router(sandbox_image_router, dependencies=_login_required)
 api_router.include_router(sandbox_instance_router, dependencies=_login_required)
 api_router.include_router(sandbox_view_router, dependencies=_login_required)
-# /retrieve 必须在 /{kb_id} 前注册, 否则路由会把 "retrieve" 解析为 kb_id
-api_router.include_router(kb_retrieve_router, dependencies=_login_required)
 api_router.include_router(kb_document_router, dependencies=_login_required)
 api_router.include_router(kb_category_router, dependencies=_login_required)
 api_router.include_router(kb_router, dependencies=_login_required)
+api_router.include_router(rag_dataset_router, dependencies=_login_required)
+api_router.include_router(sync_log_router, dependencies=_login_required)

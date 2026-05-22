@@ -390,21 +390,16 @@ export interface PolicyOptionsResp {
   context_variables: PolicyContextVariable[];
 }
 
-// ── 知识库 (M1, 详见 docs/knowledge-rag-integration-design.md) ──
+// ── 知识库 v2 (详见 docs/knowledge-v2-design.md) ──
+// 组织层:知识库 → 分类 → 文档;向量化层:RAG 库;中间靠分类映射连接。
 
 export interface KbResp {
   id: string;
   code: string;
   name: string;
   description?: string | null;
-  ragflow_dataset_id?: string | null;
-  embedding_model: string;
-  chunk_method: string;
-  parser_config?: Record<string, unknown> | null;
   doc_count: number;
-  chunk_count: number;
-  status: string;
-  last_synced_at?: number | null;
+  category_count: number;
   create_user?: string | null;
   create_time: number;
   update_time: number;
@@ -414,38 +409,7 @@ export interface KbOption {
   id: string;
   code: string;
   name: string;
-  embedding_model: string;
-  chunk_method: string;
   doc_count: number;
-}
-
-export interface KbDocumentResp {
-  id: string;
-  // Base36 引用码,由 id 派生;展示/复制用此码,API 路由仍用 id
-  ref: string;
-  kb_id: string;
-  name: string;
-  format: string;
-  size_bytes?: number | null;
-  // 旧字符串分类(只读, 下迭代删)
-  category?: string | null;
-  // 树形分类: "0"=未分类; category_name 后端 join 回填
-  category_id: string;
-  category_name?: string | null;
-  source_type: string;
-  source_meta?: Record<string, unknown> | null;
-  ragflow_doc_id?: string | null;
-  parse_status: string;
-  chunks_count: number;
-  error_message?: string | null;
-  // 解析中: 0-1 进度;done/error 状态下值不保证有意义
-  parse_progress?: number;
-  parse_begin_at?: number | null;
-  parse_duration_sec?: number | null;
-  parse_progress_msg?: string | null;
-  create_user?: string | null;
-  create_time: number;
-  update_time: number;
 }
 
 export interface KbCategoryNode {
@@ -457,6 +421,9 @@ export interface KbCategoryNode {
   sort: number;
   // 直挂该节点(不含子树)的文档数
   doc_count: number;
+  // 该分类映射到的 RAG 库(未映射时为空)
+  rag_dataset_id?: string | null;
+  rag_dataset_name?: string | null;
   children: KbCategoryNode[];
 }
 
@@ -464,6 +431,37 @@ export interface KbCategoryDeletePreview {
   deleted: boolean;
   category_count: number;
   document_count: number;
+}
+
+export interface KbDocumentResp {
+  id: string;
+  // Base36 引用码,由 id 派生
+  ref: string;
+  kb_id: string;
+  name: string;
+  format: string;
+  size_bytes?: number | null;
+  // 树形分类: "0"=未分类; category_name 后端 join 回填
+  category_id: string;
+  category_name?: string | null;
+  source_type: string;
+  source_meta?: Record<string, unknown> | null;
+  // 文档所属 RAG 库(由分类映射推导);未映射时为空
+  rag_dataset_id?: string | null;
+  ragflow_doc_id?: string | null;
+  // not_mapped / pending / parsing / done / error
+  vectorize_status: string;
+  chunks_count: number;
+  error_message?: string | null;
+  parse_progress?: number;
+  parse_begin_at?: number | null;
+  parse_duration_sec?: number | null;
+  parse_progress_msg?: string | null;
+  // 原文是否已落 blob 存储
+  has_original: boolean;
+  create_user?: string | null;
+  create_time: number;
+  update_time: number;
 }
 
 export interface KbChunkResp {
@@ -474,18 +472,86 @@ export interface KbChunkResp {
   important_keywords: string[];
 }
 
-export interface KbRetrieveHit {
+// ── RAG 库 / 映射 / 检索 ──
+
+export interface RagDatasetResp {
+  id: string;
+  name: string;
+  description?: string | null;
+  ragflow_dataset_id?: string | null;
+  embedding_model: string;
+  chunk_method: string;
+  parser_config?: Record<string, unknown> | null;
+  doc_count: number;
+  chunk_count: number;
+  mapped_category_count: number;
+  status: string;
+  last_synced_at?: number | null;
+  create_user?: string | null;
+  create_time: number;
+  update_time: number;
+}
+
+export interface RagDatasetOption {
+  id: string;
+  name: string;
+  embedding_model: string;
+  chunk_method: string;
+  doc_count: number;
+}
+
+export interface MappedCategory {
+  category_id: string;
+  category_name: string;
+  kb_id: string;
+  kb_name: string;
+  doc_count: number;
+}
+
+export interface LocalCategoryItem {
+  kb_id: string;
+  kb_name: string;
+  category_id: string;
+  category_name: string;
+  doc_count: number;
+  // 非空表示已被某 RAG 库占用
+  mapped_dataset_id?: string | null;
+}
+
+export interface RetrieveHit {
   chunk_id: string;
   content: string;
   similarity?: number | null;
   doc_id?: string | null;
   doc_name?: string | null;
   highlight?: string | null;
+  easyai_doc_id?: string | null;
+  doc_ref?: string | null;
+  kb_id?: string | null;
 }
 
-export interface KbRetrieveResp {
-  hits: KbRetrieveHit[];
+export interface RetrieveResp {
+  hits: RetrieveHit[];
   total: number;
+}
+
+// ── 同步日志 ──
+
+export interface SyncLogResp {
+  id: string;
+  log_type: string;
+  source_type?: string | null;
+  source_name?: string | null;
+  target_kb_id?: string | null;
+  target_dataset_id?: string | null;
+  docs_added: number;
+  docs_updated: number;
+  docs_deleted: number;
+  chunks_created: number;
+  status: string;
+  duration_ms?: number | null;
+  detail?: string | null;
+  create_time: number;
 }
 
 export interface SandboxViewResp {

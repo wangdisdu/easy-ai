@@ -23,7 +23,13 @@ from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
-from app.db.schema import TbKb, TbKbCategory, TbKbDocument
+from app.db.schema import (
+    TbKb,
+    TbKbCategory,
+    TbKbCategoryMapping,
+    TbKbDocument,
+    TbRagDataset,
+)
 from app.model.kb_model import (
     KbCategoryCreateReq,
     KbCategoryDeletePreview,
@@ -68,8 +74,24 @@ class KbCategoryService:
                 .group_by(TbKbDocument.category_id)
             ).all()
         )
+        # 分类 → RAG 库 映射(回填节点的 rag_dataset_id / name)
+        cat_ids = [r.id for r in rows]
+        mapping: dict[int, tuple[str, str]] = {}
+        if cat_ids:
+            for cid, did, dname in db.execute(
+                select(TbKbCategoryMapping.category_id, TbRagDataset.id, TbRagDataset.name)
+                .join(TbRagDataset, TbRagDataset.id == TbKbCategoryMapping.rag_dataset_id)
+                .where(TbKbCategoryMapping.category_id.in_(cat_ids))
+            ).all():
+                mapping[int(cid)] = (str(did), dname)
         nodes: dict[int, KbCategoryNode] = {
-            r.id: KbCategoryNode.from_entity(r, int(counts.get(r.id, 0))) for r in rows
+            r.id: KbCategoryNode.from_entity(
+                r,
+                int(counts.get(r.id, 0)),
+                mapping.get(r.id, (None, None))[0],
+                mapping.get(r.id, (None, None))[1],
+            )
+            for r in rows
         }
         roots: list[KbCategoryNode] = []
         for r in rows:
@@ -205,9 +227,13 @@ class KbCategoryService:
                 document_count=len(doc_ids),
             )
 
-        # 先删文档(含 RAGFlow), 失败 fail-fast 不动分类
+        # 先删文档(含 blob + RAGFlow), 失败 fail-fast 不动分类
         if doc_ids:
             self._doc_service.delete_documents(db, kb_id, doc_ids, req_ctx)
+        # 清理这些分类的 RAG 库映射
+        db.query(TbKbCategoryMapping).filter(
+            TbKbCategoryMapping.category_id.in_(sub_cat_ids)
+        ).delete(synchronize_session=False)
         db.query(TbKbCategory).filter(
             TbKbCategory.kb_id == kb_id, TbKbCategory.id.in_(sub_cat_ids)
         ).delete(synchronize_session=False)

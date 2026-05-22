@@ -1,18 +1,5 @@
 <template>
-  <section class="alert-page">
-    <div class="alert-page-head">
-      <div>
-        <h2 class="alert-page-title">告警规则</h2>
-        <p class="alert-page-sub">配置监控指标的阈值与触发条件,命中后自动产生告警</p>
-      </div>
-      <a-button type="primary" class="head-btn" @click="router.push('/observability/alert-rule/create')">
-        <template #icon><PlusOutlined /></template>
-        新建规则
-      </a-button>
-    </div>
-
-    <ObsTabBar />
-
+  <div class="alert-rule-view">
     <div class="filter-bar">
       <a-input-search
         v-model:value="keyword"
@@ -41,6 +28,14 @@
         ]"
         @change="onSearch"
       />
+      <a-button
+        type="primary"
+        class="create-btn"
+        @click="router.push('/observability/alert-rule/create')"
+      >
+        <template #icon><PlusOutlined /></template>
+        新建规则
+      </a-button>
     </div>
 
     <a-table
@@ -117,7 +112,7 @@
         @change="loadList"
       />
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -128,7 +123,6 @@ import { message } from "ant-design-vue";
 import * as alertApi from "@/api/alert";
 import type { AlertRuleResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
-import ObsTabBar from "./ObsTabBar.vue";
 import {
   ERROR_TYPE_LABEL,
   LEVEL_LABEL,
@@ -231,20 +225,7 @@ onMounted(loadList);
 </script>
 
 <style scoped>
-.alert-page {
-  border: 1px solid var(--surface-card-border);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, var(--color-violet-bg), transparent 28%),
-    var(--surface-card-bg);
-  box-shadow: var(--surface-card-shadow);
-  padding: 24px;
-}
-
-.alert-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.alert-page-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--color-text); }
-.alert-page-sub { margin: 6px 0 0; font-size: 13px; color: var(--color-text-tertiary); }
-.head-btn { height: 40px; padding-inline: 16px; border-radius: 12px; }
+.create-btn { margin-left: auto; }
 
 .filter-bar { display: flex; align-items: center; gap: 12px; margin: 16px 0 18px; }
 .search-input { width: 260px; }

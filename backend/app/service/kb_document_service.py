@@ -1,14 +1,15 @@
-"""KB 文档业务层。
+"""KB 文档业务层(v2)。
 
-每个 ``tb_kb_document`` 与 RAGFlow Document 1:1 映射:
-- upload_documents: 调 RAGFlow ``upload_documents`` + ``parse_documents`` 触发异步解析,
-  本地立即记录 ``parse_status='parsing'``,前端可轮询
-- list_documents: 纯读本地; refresh=True 时强制按 dataset 拉 RAGFlow 对账
-- get_document_detail: 本地 + RAGFlow ``get_document`` 拿最新解析状态
-- get_document_chunks: 透传 RAGFlow ``list_chunks``
-- delete_documents / reparse_documents: 先调上游,本地状态同步
+easy-ai 是文档真相源:上传 = 存 blob + 写记录 + 写集成日志,**不触达 RAGFlow**。
+文档的向量化由向量化 worker 异步完成(见 ``vectorization_service``)。
 
-详见 ``docs/knowledge-rag-integration-design.md`` §5.4。
+- upload_documents: 存原文到 blob;分类已映射 RAG 库则置 ``pending`` 等 worker
+- move_documents: 改分类;跨 RAG 库时解绑旧绑定 + 重新置 pending
+- delete_documents: 删 blob + 删 RAGFlow 文档 + 删记录
+- download_document: 从 blob 读原文
+- list_document_chunks: 透传 RAGFlow(仅已向量化文档)
+
+详见 ``docs/knowledge-v2-design.md`` §6 / §8。
 """
 
 from __future__ import annotations
@@ -17,26 +18,32 @@ import json
 import logging
 import os
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.doc_ref import decode_doc_ref
 from app.core.error_code import ErrorCode
 from app.core.exceptions import ServiceError
 from app.core.request_context import RequestContext
 from app.core.snowflake import SnowflakeGenerator
-from app.db.schema import TbKb, TbKbCategory, TbKbDocument
-from app.integration import ragflow_client
+from app.db.schema import (
+    TbKb,
+    TbKbCategory,
+    TbKbCategoryMapping,
+    TbKbDocument,
+    TbRagDataset,
+)
+from app.integration import kb_storage, ragflow_client
 from app.model.kb_model import KbChunkResp, KbDocumentPageReq, KbDocumentResp
 from app.service.kb_errors import to_service_error
+from app.service.sync_log_service import SyncLogService
 
 logger = logging.getLogger(__name__)
 
-# 上传约束(与 §5.4 重要约束一致)
 MAX_UPLOAD_FILES = 20
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB
 
-# 扩展名 → format 标签(纯展示用,RAGFlow 自己用 MIME 推断真实解析器)
 _FORMAT_BY_EXT: dict[str, str] = {
     ".pdf": "PDF",
     ".docx": "DOCX",
@@ -55,7 +62,6 @@ _FORMAT_BY_EXT: dict[str, str] = {
     ".gif": "IMG",
 }
 
-# 扩展名 → MIME(RAGFlow upload 接受 multipart; mime 给 multipart Content-Type)
 _MIME_BY_EXT: dict[str, str] = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -74,57 +80,19 @@ _MIME_BY_EXT: dict[str, str] = {
     ".gif": "image/gif",
 }
 
-# RAGFlow `document.run` → easy-ai `parse_status` 映射
-_RAGFLOW_RUN_TO_STATUS = {
-    "UNSTART": "pending",
-    "RUNNING": "parsing",
-    "DONE": "done",
-    "FAIL": "error",
-    "CANCEL": "cancelled",
-    # 兼容数字版本(SDK 文档里 "run": "0"/"1"/...)
-    "0": "pending",
-    "1": "parsing",
-    "2": "cancelled",
-    "3": "done",
-    "4": "error",
-}
-
 
 def _infer_format(filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower()
-    return _FORMAT_BY_EXT.get(ext, "BIN")
+    return _FORMAT_BY_EXT.get(os.path.splitext(filename)[1].lower(), "BIN")
 
 
 def _infer_mime(filename: str) -> str | None:
-    ext = os.path.splitext(filename)[1].lower()
-    return _MIME_BY_EXT.get(ext)
-
-
-def _normalize_status(run_value: object) -> str:
-    return _RAGFLOW_RUN_TO_STATUS.get(str(run_value or "").upper(), "parsing")
-
-
-def _parse_ragflow_timestamp(v: object) -> int | None:
-    """RAGFlow process_begin_at 可能是 unix 秒(float)/ 毫秒 / ISO 字符串。
-    统一规整为 unix-ms;无法识别返回 None。"""
-    if v is None or v == "":
-        return None
-    if isinstance(v, (int, float)):
-        # 经验阈值:>1e12 视作 ms,否则 s
-        return int(v) if v > 1e12 else int(v * 1000)
-    if isinstance(v, str):
-        try:
-            from datetime import datetime
-
-            return int(datetime.fromisoformat(v.replace(" ", "T")).timestamp() * 1000)
-        except ValueError:
-            return None
-    return None
+    return _MIME_BY_EXT.get(os.path.splitext(filename)[1].lower())
 
 
 class KbDocumentService:
     def __init__(self, id_generator: SnowflakeGenerator) -> None:
         self._id_generator = id_generator
+        self._sync_log = SyncLogService(id_generator)
 
     # ── 写操作 ────────────────────────────────────────────────────────
 
@@ -136,16 +104,12 @@ class KbDocumentService:
         category_id: int,
         req_ctx: RequestContext,
     ) -> list[KbDocumentResp]:
-        """``files`` 为 (filename, blob) 列表。
-        - 单次上传 ≤ ``MAX_UPLOAD_FILES`` 件
-        - 单文件 ≤ ``MAX_FILE_SIZE_BYTES``
-        """
+        """``files`` 为 (filename, blob) 列表。存原文到 blob,不触达 RAGFlow。"""
         if not files:
             raise ServiceError(ErrorCode.BAD_REQUEST, "no files to upload")
         if len(files) > MAX_UPLOAD_FILES:
             raise ServiceError(
-                ErrorCode.BAD_REQUEST,
-                f"too many files: {len(files)} > {MAX_UPLOAD_FILES}",
+                ErrorCode.BAD_REQUEST, f"too many files: {len(files)} > {MAX_UPLOAD_FILES}"
             )
         for name, blob in files:
             if not name or not blob:
@@ -158,101 +122,109 @@ class KbDocumentService:
 
         kb = self._get_kb_or_raise(db, kb_id)
         self._assert_category_in_kb(db, kb_id, category_id)
-        if not kb.ragflow_dataset_id:
-            raise ServiceError(ErrorCode.BAD_REQUEST, f"kb {kb_id} not linked to ragflow dataset")
+        rag_dataset_id = self._mapping_for_category(db, category_id)
+        vectorize_status = "pending" if rag_dataset_id else "not_mapped"
 
-        # 1. 调 RAGFlow upload + parse(失败抛 ServiceError, 不写本地)
-        self._require_ragflow_enabled()
-        client = ragflow_client.get_client()
-        upload_payload: list[tuple[str, bytes, str | None]] = [
-            (name, blob, _infer_mime(name)) for name, blob in files
-        ]
-        try:
-            uploaded = client.upload_documents(
-                kb.ragflow_dataset_id, upload_payload, user_id=req_ctx.user_id
-            )
-        except ragflow_client.RagflowClientError as e:
-            logger.error("[kb] upload_documents failed kb_id=%s err=%s", kb_id, e)
-            raise to_service_error(e, "upload_documents") from e
-
-        ragflow_doc_ids = [d.get("id") for d in uploaded if d.get("id")]
-        if ragflow_doc_ids:
-            try:
-                client.parse_documents(
-                    kb.ragflow_dataset_id, ragflow_doc_ids, user_id=req_ctx.user_id
-                )
-            except ragflow_client.RagflowClientError as e:
-                # 解析触发失败不阻断: 文档已经入 RAGFlow,只是没开始解析;
-                # 后台 poller 30s 内不会看到状态翻转,运维可手动 reparse。
-                logger.warning(
-                    "[kb] parse_documents trigger failed kb_id=%s docs=%s err=%s",
-                    kb_id,
-                    ragflow_doc_ids,
-                    e,
-                )
-
-        # 2. 落本地(逐条 insert; 已存在同名则更新 ragflow_doc_id + 状态)
         now = req_ctx.request_time_ms
+        saved_paths: list[str] = []
         result: list[TbKbDocument] = []
-        for src, doc in zip(files, uploaded, strict=False):
-            display_name = src[0]
-            blob = src[1]
-            entity = db.scalar(
-                select(TbKbDocument).where(
-                    TbKbDocument.kb_id == kb_id,
-                    TbKbDocument.name == display_name,
-                )
-            )
-            if entity is None:
-                entity = TbKbDocument(
-                    id=self._id_generator.next_id(),
-                    kb_id=kb_id,
-                    name=display_name,
-                    format=_infer_format(display_name),
-                    size_bytes=len(blob),
-                    category_id=category_id,
-                    source_type="file",
-                    source_meta=json.dumps({"display_name": display_name}, ensure_ascii=False),
-                    ragflow_doc_id=doc.get("id"),
-                    parse_status="parsing",
-                    chunks_count=0,
-                    error_message=None,
-                    create_time=now,
-                    update_time=now,
-                    create_user=req_ctx.user_id,
-                    update_user=req_ctx.user_id,
-                )
-                db.add(entity)
-            else:
-                # 同名覆盖: 更新映射 + 重置状态
-                entity.ragflow_doc_id = doc.get("id")
-                entity.size_bytes = len(blob)
-                entity.parse_status = "parsing"
-                entity.chunks_count = 0
-                entity.error_message = None
-                entity.category_id = category_id
-                entity.update_time = now
-                entity.update_user = req_ctx.user_id
-            result.append(entity)
+        orphan_ragflow: dict[int, list[str]] = {}
+        new_count = overwrite_count = 0
 
         try:
+            for display_name, blob in files:
+                ext = os.path.splitext(display_name)[1]
+                entity = db.scalar(
+                    select(TbKbDocument).where(
+                        TbKbDocument.kb_id == kb_id,
+                        TbKbDocument.name == display_name,
+                    )
+                )
+                if entity is None:
+                    doc_id = self._id_generator.next_id()
+                    relpath = kb_storage.build_relpath(kb_id, doc_id, ext)
+                    kb_storage.save(relpath, blob)
+                    saved_paths.append(relpath)
+                    entity = TbKbDocument(
+                        id=doc_id,
+                        kb_id=kb_id,
+                        name=display_name,
+                        format=_infer_format(display_name),
+                        size_bytes=len(blob),
+                        storage_path=relpath,
+                        category_id=category_id,
+                        source_type="file",
+                        source_meta=json.dumps(
+                            {"original_filename": display_name}, ensure_ascii=False
+                        ),
+                        rag_dataset_id=rag_dataset_id,
+                        ragflow_doc_id=None,
+                        vectorize_status=vectorize_status,
+                        chunks_count=0,
+                        error_message=None,
+                        parse_progress=0.0,
+                        create_time=now,
+                        update_time=now,
+                        create_user=req_ctx.user_id,
+                        update_user=req_ctx.user_id,
+                    )
+                    db.add(entity)
+                    new_count += 1
+                else:
+                    # 同名覆盖: 旧 RAGFlow 文档需清理
+                    if entity.ragflow_doc_id and entity.rag_dataset_id:
+                        orphan_ragflow.setdefault(entity.rag_dataset_id, []).append(
+                            entity.ragflow_doc_id
+                        )
+                    relpath = entity.storage_path or kb_storage.build_relpath(kb_id, entity.id, ext)
+                    kb_storage.save(relpath, blob)
+                    saved_paths.append(relpath)
+                    entity.format = _infer_format(display_name)
+                    entity.size_bytes = len(blob)
+                    entity.storage_path = relpath
+                    entity.category_id = category_id
+                    entity.rag_dataset_id = rag_dataset_id
+                    entity.ragflow_doc_id = None
+                    entity.vectorize_status = vectorize_status
+                    entity.chunks_count = 0
+                    entity.error_message = None
+                    entity.parse_progress = 0.0
+                    entity.parse_begin_at = None
+                    entity.parse_duration_sec = None
+                    entity.parse_progress_msg = None
+                    entity.update_time = now
+                    entity.update_user = req_ctx.user_id
+                    overwrite_count += 1
+                result.append(entity)
             db.commit()
         except Exception as e:
             db.rollback()
-            logger.error(
-                "[kb] document insert failed kb_id=%s ragflow_docs=%s err=%s",
-                kb_id,
-                ragflow_doc_ids,
-                e,
-            )
-            raise ServiceError(ErrorCode.INTERNAL_ERROR, f"kb_document insert failed: {e}") from e
+            for p in saved_paths:
+                kb_storage.delete(p)
+            if isinstance(e, ServiceError):
+                raise
+            logger.error("[kb] upload failed kb_id=%s err=%s", kb_id, e)
+            raise ServiceError(ErrorCode.INTERNAL_ERROR, f"kb upload failed: {e}") from e
+
         for r in result:
             db.refresh(r)
+        # 同名覆盖产生的孤儿 RAGFlow 文档, 尽力清理
+        self._cleanup_ragflow_docs(db, orphan_ragflow, req_ctx.user_id)
+
+        self._sync_log.write(
+            db,
+            log_type="integration",
+            status="success",
+            source_type="file",
+            source_name="文件上传",
+            target_kb_id=kb_id,
+            docs_added=new_count,
+            docs_updated=overwrite_count,
+            detail=f"上传 {len(result)} 篇文档到「{kb.name}」",
+            create_user=req_ctx.user_id,
+        )
         logger.info(
-            "[kb] action=upload kb_id=%s n=%d ragflow_docs=%s",
-            kb_id,
-            len(result),
-            ragflow_doc_ids,
+            "[kb] action=upload kb_id=%s new=%d overwrite=%d", kb_id, new_count, overwrite_count
         )
         name_map = self._category_name_map(db, kb_id)
         return [KbDocumentResp.from_entity(r, name_map.get(r.category_id)) for r in result]
@@ -265,20 +237,35 @@ class KbDocumentService:
         category_id: int,
         req_ctx: RequestContext,
     ) -> int:
-        """把文档移动到目标分类。纯本地操作, 不触达 RAGFlow。"""
+        """把文档移动到目标分类。跨 RAG 库时解绑旧绑定并重新置 pending。"""
         if not doc_ids:
             return 0
         self._get_kb_or_raise(db, kb_id)
         self._assert_category_in_kb(db, kb_id, category_id)
+        target_dataset = self._mapping_for_category(db, category_id)
+
         rows = db.scalars(
             select(TbKbDocument).where(TbKbDocument.kb_id == kb_id, TbKbDocument.id.in_(doc_ids))
         ).all()
         now = req_ctx.request_time_ms
+        cleanup: dict[int, list[str]] = {}
         for row in rows:
             row.category_id = category_id
+            if row.rag_dataset_id != target_dataset:
+                if row.ragflow_doc_id and row.rag_dataset_id:
+                    cleanup.setdefault(row.rag_dataset_id, []).append(row.ragflow_doc_id)
+                row.rag_dataset_id = target_dataset
+                row.ragflow_doc_id = None
+                row.vectorize_status = "pending" if target_dataset else "not_mapped"
+                row.error_message = None
+                row.parse_progress = 0.0
+                row.parse_begin_at = None
+                row.parse_duration_sec = None
+                row.parse_progress_msg = None
             row.update_time = now
             row.update_user = req_ctx.user_id
         db.commit()
+        self._cleanup_ragflow_docs(db, cleanup, req_ctx.user_id)
         logger.info("[kb] action=move_docs kb_id=%s n=%d cat=%s", kb_id, len(rows), category_id)
         return len(rows)
 
@@ -287,99 +274,47 @@ class KbDocumentService:
     ) -> int:
         if not doc_ids:
             return 0
-        kb = self._get_kb_or_raise(db, kb_id)
+        self._get_kb_or_raise(db, kb_id)
         rows = db.scalars(
             select(TbKbDocument).where(TbKbDocument.kb_id == kb_id, TbKbDocument.id.in_(doc_ids))
         ).all()
         if not rows:
             return 0
 
-        ragflow_doc_ids = [r.ragflow_doc_id for r in rows if r.ragflow_doc_id]
-        if ragflow_doc_ids and kb.ragflow_dataset_id:
-            self._require_ragflow_enabled()
-            client = ragflow_client.get_client()
-            try:
-                client.delete_documents(
-                    kb.ragflow_dataset_id, ragflow_doc_ids, user_id=req_ctx.user_id
-                )
-            except ragflow_client.RagflowClientError as e:
-                logger.error(
-                    "[kb] delete_documents upstream failed kb_id=%s ids=%s err=%s",
-                    kb_id,
-                    ragflow_doc_ids,
-                    e,
-                )
-                raise to_service_error(e, "delete_documents") from e
+        cleanup: dict[int, list[str]] = {}
+        for row in rows:
+            if row.ragflow_doc_id and row.rag_dataset_id:
+                cleanup.setdefault(row.rag_dataset_id, []).append(row.ragflow_doc_id)
+        self._cleanup_ragflow_docs(db, cleanup, req_ctx.user_id)
 
         for row in rows:
+            kb_storage.delete(row.storage_path)
             db.delete(row)
         db.commit()
         logger.info("[kb] action=delete_docs kb_id=%s deleted=%d", kb_id, len(rows))
         return len(rows)
 
-    def reparse_documents(
-        self, db: Session, kb_id: int, doc_ids: list[int], req_ctx: RequestContext
-    ) -> int:
-        if not doc_ids:
-            return 0
-        kb = self._get_kb_or_raise(db, kb_id)
-        if not kb.ragflow_dataset_id:
-            raise ServiceError(ErrorCode.BAD_REQUEST, f"kb {kb_id} not linked to ragflow dataset")
-        rows = db.scalars(
-            select(TbKbDocument).where(TbKbDocument.kb_id == kb_id, TbKbDocument.id.in_(doc_ids))
-        ).all()
-        ragflow_doc_ids = [r.ragflow_doc_id for r in rows if r.ragflow_doc_id]
-        if not ragflow_doc_ids:
-            return 0
-
-        self._require_ragflow_enabled()
-        client = ragflow_client.get_client()
-        try:
-            client.parse_documents(kb.ragflow_dataset_id, ragflow_doc_ids, user_id=req_ctx.user_id)
-        except ragflow_client.RagflowClientError as e:
-            logger.error("[kb] reparse failed kb_id=%s err=%s", kb_id, e)
-            raise to_service_error(e, "parse_documents") from e
-
-        now = req_ctx.request_time_ms
-        for row in rows:
-            if row.ragflow_doc_id:
-                row.parse_status = "parsing"
-                row.error_message = None
-                row.update_time = now
-                row.update_user = req_ctx.user_id
-        db.commit()
-        logger.info("[kb] action=reparse kb_id=%s n=%d", kb_id, len(ragflow_doc_ids))
-        return len(ragflow_doc_ids)
-
     # ── 读操作 ────────────────────────────────────────────────────────
 
     def page_documents(
-        self,
-        db: Session,
-        kb_id: int,
-        req: KbDocumentPageReq,
+        self, db: Session, kb_id: int, req: KbDocumentPageReq
     ) -> tuple[list[KbDocumentResp], int]:
-        # 校验 kb 存在(404 体验)
         self._get_kb_or_raise(db, kb_id)
-
         stmt = select(TbKbDocument).where(TbKbDocument.kb_id == kb_id)
         count_stmt = select(func.count(TbKbDocument.id)).where(TbKbDocument.kb_id == kb_id)
         conditions = []
         if req.keyword:
-            keyword = f"%{req.keyword}%"
-            conditions.append(or_(TbKbDocument.name.like(keyword)))
-        if req.category:
-            # 旧字符串过滤, 向后兼容
-            conditions.append(TbKbDocument.category == req.category)
+            conditions.append(TbKbDocument.name.like(f"%{req.keyword}%"))
         if req.category_id is not None:
             cid = int(req.category_id)
             if req.recursive and cid > 0:
-                sub_ids = self._subtree_category_ids(db, kb_id, cid)
-                conditions.append(TbKbDocument.category_id.in_(sub_ids))
+                conditions.append(
+                    TbKbDocument.category_id.in_(self._subtree_category_ids(db, kb_id, cid))
+                )
             else:
                 conditions.append(TbKbDocument.category_id == cid)
-        if req.parse_status:
-            conditions.append(TbKbDocument.parse_status == req.parse_status)
+        if req.vectorize_status:
+            conditions.append(TbKbDocument.vectorize_status == req.vectorize_status)
         if conditions:
             stmt = stmt.where(*conditions)
             count_stmt = count_stmt.where(*conditions)
@@ -393,39 +328,11 @@ class KbDocumentService:
         name_map = self._category_name_map(db, kb_id)
         return [KbDocumentResp.from_entity(r, name_map.get(r.category_id)) for r in rows], total
 
-    def get_document_detail(
-        self, db: Session, kb_id: int, doc_id: int, req_ctx: RequestContext
-    ) -> KbDocumentResp:
-        """读本地 + 强制按 RAGFlow 拉一次最新状态(打开详情时使用)。"""
-        kb = self._get_kb_or_raise(db, kb_id)
+    def get_document_detail(self, db: Session, kb_id: int, doc_id: int) -> KbDocumentResp:
         entity = self._get_doc_or_raise(db, kb_id, doc_id)
-
-        if entity.ragflow_doc_id and kb.ragflow_dataset_id and settings.ragflow_enabled:
-            client = ragflow_client.get_client()
-            try:
-                doc = client.get_document(
-                    kb.ragflow_dataset_id, entity.ragflow_doc_id, user_id=req_ctx.user_id
-                )
-            except ragflow_client.RagflowClientError as e:
-                logger.warning(
-                    "[kb] get_document upstream failed kb_id=%s doc_id=%s err=%s",
-                    kb_id,
-                    doc_id,
-                    e,
-                )
-                doc = None
-            if doc is not None:
-                updated = self._sync_doc_status(entity, doc, req_ctx.request_time_ms)
-                if updated:
-                    db.commit()
-                    db.refresh(entity)
         return KbDocumentResp.from_entity(entity, self._one_category_name(db, entity))
 
     def get_document_by_ref(self, db: Session, ref: str) -> KbDocumentResp:
-        """Base36 引用码 → KbDocumentResp。无需 kb_id;若 ref 无效或文档
-        不存在抛 DATA_NOT_FOUND。"""
-        from app.core.doc_ref import decode_doc_ref
-
         try:
             doc_id = decode_doc_ref(ref)
         except ValueError as e:
@@ -435,34 +342,12 @@ class KbDocumentService:
             raise ServiceError(ErrorCode.DATA_NOT_FOUND, f"document not found for ref={ref}")
         return KbDocumentResp.from_entity(entity, self._one_category_name(db, entity))
 
-    def download_document(
-        self, db: Session, kb_id: int, doc_id: int, req_ctx: RequestContext
-    ) -> tuple[bytes, str, str]:
-        """返回 (raw_bytes, mime_type, filename),供 API 层 streaming 转发。
-
-        RAGFlow 那边没存原始文件名,直接用 tb_kb_document.name(就是上传时
-        的展示名,format/size 一并存的),保持与列表一致。
-        """
-        kb = self._get_kb_or_raise(db, kb_id)
+    def download_document(self, db: Session, kb_id: int, doc_id: int) -> tuple[bytes, str, str]:
+        """返回 (raw_bytes, mime_type, filename),原文从 blob 存储读取。"""
         entity = self._get_doc_or_raise(db, kb_id, doc_id)
-        if not entity.ragflow_doc_id or not kb.ragflow_dataset_id:
-            raise ServiceError(
-                ErrorCode.BAD_REQUEST,
-                f"document {doc_id} not yet bound to ragflow",
-            )
-        if not settings.ragflow_enabled:
-            raise ServiceError(ErrorCode.BAD_REQUEST, "ragflow integration disabled")
-
-        client = ragflow_client.get_client()
-        try:
-            blob = client.download_document(
-                kb.ragflow_dataset_id, entity.ragflow_doc_id, user_id=req_ctx.user_id
-            )
-        except ragflow_client.RagflowClientError as e:
-            logger.error(
-                "[kb] download upstream failed kb_id=%s doc_id=%s err=%s", kb_id, doc_id, e
-            )
-            raise to_service_error(e, "download_document") from e
+        if not kb_storage.exists(entity.storage_path):
+            raise ServiceError(ErrorCode.DATA_NOT_FOUND, f"document {doc_id} original file missing")
+        blob = kb_storage.load(entity.storage_path)
         mime = _infer_mime(entity.name) or "application/octet-stream"
         return blob, mime, entity.name
 
@@ -477,15 +362,19 @@ class KbDocumentService:
         page_size: int = 30,
         keywords: str | None = None,
     ) -> tuple[list[KbChunkResp], int]:
-        kb = self._get_kb_or_raise(db, kb_id)
         entity = self._get_doc_or_raise(db, kb_id, doc_id)
-        if not entity.ragflow_doc_id or not kb.ragflow_dataset_id:
+        if not entity.ragflow_doc_id or not entity.rag_dataset_id:
             return [], 0
-        self._require_ragflow_enabled()
+        dataset = db.get(TbRagDataset, entity.rag_dataset_id)
+        if not dataset or not dataset.ragflow_dataset_id:
+            return [], 0
+        if not settings.ragflow_enabled:
+            raise ServiceError(ErrorCode.BAD_REQUEST, "ragflow integration disabled")
+
         client = ragflow_client.get_client()
         try:
             data = client.list_chunks(
-                kb.ragflow_dataset_id,
+                dataset.ragflow_dataset_id,
                 entity.ragflow_doc_id,
                 user_id=req_ctx.user_id,
                 page=page,
@@ -493,137 +382,58 @@ class KbDocumentService:
                 keywords=keywords,
             )
         except ragflow_client.RagflowClientError as e:
-            logger.error("[kb] list_chunks failed kb_id=%s doc_id=%s err=%s", kb_id, doc_id, e)
+            logger.error("[kb] list_chunks failed doc_id=%s err=%s", doc_id, e)
             raise to_service_error(e, "list_chunks") from e
 
         chunks_raw = data.get("chunks") if isinstance(data, dict) else None
         total = int(data.get("total") or 0) if isinstance(data, dict) else 0
-        chunks: list[KbChunkResp] = []
-        for c in chunks_raw or []:
-            chunks.append(
-                KbChunkResp(
-                    id=str(c.get("id") or c.get("chunk_id") or ""),
-                    content=str(c.get("content") or c.get("content_with_weight") or ""),
-                    document_id=c.get("document_id") or c.get("doc_id"),
-                    document_keyword=c.get("document_keyword") or c.get("docnm_kwd"),
-                    important_keywords=c.get("important_keywords") or [],
-                )
+        chunks = [
+            KbChunkResp(
+                id=str(c.get("id") or c.get("chunk_id") or ""),
+                content=str(c.get("content") or c.get("content_with_weight") or ""),
+                document_id=c.get("document_id") or c.get("doc_id"),
+                document_keyword=c.get("document_keyword") or c.get("docnm_kwd"),
+                important_keywords=c.get("important_keywords") or [],
             )
+            for c in (chunks_raw or [])
+        ]
         return chunks, total
 
-    # ── 后台 poller 用 ────────────────────────────────────────────────
+    # ── 内部 ──────────────────────────────────────────────────────────
 
-    def batch_sync_status(
-        self,
-        db: Session,
-        kb_id: int,
-        ragflow_dataset_id: str,
-        request_time_ms: int,
-    ) -> int:
-        """后台 poller 单次回拉: 把指定 KB 下 pending/parsing 的文档与 RAGFlow 对账。
-        返回更新条数。具体调度由 ``app/app/kb_status_poller.py`` 负责(Step 4)。
-        """
-        rows = db.scalars(
-            select(TbKbDocument).where(
-                TbKbDocument.kb_id == kb_id,
-                TbKbDocument.parse_status.in_(("pending", "parsing")),
-            )
-        ).all()
-        if not rows:
-            return 0
-
-        self._require_ragflow_enabled()
+    def _cleanup_ragflow_docs(
+        self, db: Session, by_dataset: dict[int, list[str]], user_id: int | None
+    ) -> None:
+        """尽力从 RAGFlow 删除文档(解绑/覆盖/删除场景);失败仅日志。"""
+        if not by_dataset or not settings.ragflow_enabled:
+            return
         client = ragflow_client.get_client()
-        ragflow_id_to_local = {r.ragflow_doc_id: r for r in rows if r.ragflow_doc_id}
-        if not ragflow_id_to_local:
-            return 0
-
-        try:
-            data = client.list_documents(
-                ragflow_dataset_id,
-                user_id=None,
-                page=1,
-                page_size=max(len(ragflow_id_to_local), 30),
-            )
-        except ragflow_client.RagflowClientError as e:
-            logger.warning("[kb] poller list_documents failed kb_id=%s err=%s", kb_id, e)
-            return 0
-
-        upstream_docs = data.get("docs") if isinstance(data, dict) else None
-        updated = 0
-        for d in upstream_docs or []:
-            doc_id = d.get("id")
-            entity = ragflow_id_to_local.get(doc_id)
-            if entity is None:
+        for dataset_id, ragflow_doc_ids in by_dataset.items():
+            dataset = db.get(TbRagDataset, dataset_id)
+            if not dataset or not dataset.ragflow_dataset_id or not ragflow_doc_ids:
                 continue
-            if self._sync_doc_status(entity, d, request_time_ms):
-                updated += 1
+            try:
+                client.delete_documents(
+                    dataset.ragflow_dataset_id, ragflow_doc_ids, user_id=user_id
+                )
+            except ragflow_client.RagflowClientError as e:
+                logger.warning(
+                    "[kb] best-effort delete ragflow docs failed dataset=%s err=%s",
+                    dataset_id,
+                    e,
+                )
 
-        if updated:
-            db.commit()
-        return updated
-
-    # ── 内部工具 ──────────────────────────────────────────────────────
-
-    def _sync_doc_status(self, entity: TbKbDocument, upstream: dict, now_ms: int) -> bool:
-        run_value = upstream.get("run") or upstream.get("status")
-        new_status = _normalize_status(run_value)
-        # chunk_num / chunks_count: RAGFlow 不同接口字段名略有差异
-        new_chunks = int(
-            upstream.get("chunk_num")
-            or upstream.get("chunks_count")
-            or upstream.get("chunk_count")
-            or 0
-        )
-        progress_msg = upstream.get("progress_msg")
-        err = upstream.get("error") or (progress_msg if new_status == "error" else None)
-        # RAGFlow document.progress 是 0-1 float;某些情况下解析失败 progress=-1,
-        # 这里 clamp 到 0,前端只在 parsing 状态用它,error/done 走 status pill
-        try:
-            new_progress = float(upstream.get("progress") or 0.0)
-        except (TypeError, ValueError):
-            new_progress = 0.0
-        new_progress = max(0.0, min(1.0, new_progress))
-        new_begin = upstream.get("process_begin_at")
-        try:
-            new_duration = (
-                float(upstream.get("process_duration"))
-                if upstream.get("process_duration") is not None
-                else None
+    def _mapping_for_category(self, db: Session, category_id: int) -> int | None:
+        if category_id <= 0:
+            return None
+        ds = db.scalar(
+            select(TbKbCategoryMapping.rag_dataset_id).where(
+                TbKbCategoryMapping.category_id == category_id
             )
-        except (TypeError, ValueError):
-            new_duration = None
-        changed = False
-        if entity.parse_status != new_status:
-            entity.parse_status = new_status
-            changed = True
-        if entity.chunks_count != new_chunks:
-            entity.chunks_count = new_chunks
-            changed = True
-        if new_status == "error" and err and entity.error_message != err:
-            entity.error_message = str(err)[:1024]
-            changed = True
-        if entity.parse_progress != new_progress:
-            entity.parse_progress = new_progress
-            changed = True
-        if progress_msg is not None and entity.parse_progress_msg != progress_msg:
-            entity.parse_progress_msg = str(progress_msg)[:1024]
-            changed = True
-        # 仅首次拿到 process_begin_at 时记录,避免 RAGFlow 后续返回飘动
-        if entity.parse_begin_at is None:
-            parsed_begin = _parse_ragflow_timestamp(new_begin)
-            if parsed_begin:
-                entity.parse_begin_at = parsed_begin
-                changed = True
-        if new_duration is not None and entity.parse_duration_sec != new_duration:
-            entity.parse_duration_sec = new_duration
-            changed = True
-        if changed:
-            entity.update_time = now_ms
-        return changed
+        )
+        return int(ds) if ds else None
 
     def _category_name_map(self, db: Session, kb_id: int) -> dict[int, str]:
-        """kb 内 {category_id: name},用于列表/详情回填 category_name。"""
         rows = db.execute(
             select(TbKbCategory.id, TbKbCategory.name).where(TbKbCategory.kb_id == kb_id)
         ).all()
@@ -636,13 +446,14 @@ class KbDocumentService:
                 ErrorCode.DATA_NOT_FOUND,
                 f"kb_category not found: kb={kb_id} cat={category_id}",
             )
-        rows = db.scalars(
-            select(TbKbCategory.id).where(
-                TbKbCategory.kb_id == kb_id,
-                TbKbCategory.id_path.like(f"{node.id_path}%"),
-            )
-        ).all()
-        return list(rows)
+        return list(
+            db.scalars(
+                select(TbKbCategory.id).where(
+                    TbKbCategory.kb_id == kb_id,
+                    TbKbCategory.id_path.like(f"{node.id_path}%"),
+                )
+            ).all()
+        )
 
     def _one_category_name(self, db: Session, entity: TbKbDocument) -> str | None:
         if entity.category_id <= 0:
@@ -651,7 +462,6 @@ class KbDocumentService:
         return node.name if node else None
 
     def _assert_category_in_kb(self, db: Session, kb_id: int, category_id: int) -> None:
-        """category_id<=0(未分类)直接放行; 否则必须是本 kb 下已存在的分类。"""
         if category_id <= 0:
             return
         node = db.get(TbKbCategory, category_id)
@@ -660,10 +470,6 @@ class KbDocumentService:
                 ErrorCode.DATA_NOT_FOUND,
                 f"kb_category not found: kb={kb_id} cat={category_id}",
             )
-
-    def _require_ragflow_enabled(self) -> None:
-        if not settings.ragflow_enabled:
-            raise ServiceError(ErrorCode.BAD_REQUEST, "ragflow integration disabled")
 
     def _get_kb_or_raise(self, db: Session, kb_id: int) -> TbKb:
         entity = db.get(TbKb, kb_id)

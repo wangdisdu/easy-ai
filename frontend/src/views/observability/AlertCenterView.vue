@@ -1,18 +1,5 @@
 <template>
-  <section class="alert-page">
-    <div class="alert-page-head">
-      <div>
-        <h2 class="alert-page-title">告警中心</h2>
-        <p class="alert-page-sub">查看、确认与恢复由告警规则产生的告警记录</p>
-      </div>
-      <a-button class="head-btn" :loading="loading" @click="refreshAll">
-        <template #icon><ReloadOutlined /></template>
-        刷新
-      </a-button>
-    </div>
-
-    <ObsTabBar />
-
+  <div class="alert-center-view">
     <!-- 活跃告警概览 -->
     <div class="active-strip">
       <div v-if="active && active.total === 0" class="active-ok">
@@ -60,6 +47,10 @@
         :options="RANGE_OPTIONS"
         @change="onSearch"
       />
+      <a-button class="refresh-btn" :loading="loading" @click="refreshAll">
+        <template #icon><ReloadOutlined /></template>
+        刷新
+      </a-button>
     </div>
 
     <a-table
@@ -191,7 +182,7 @@
         </div>
       </template>
     </a-drawer>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -201,7 +192,6 @@ import { message } from "ant-design-vue";
 import * as alertApi from "@/api/alert";
 import type { AlertActiveResp, AlertRecordResp, AlertTraceResp } from "@/api/types";
 import { formatMs } from "@/utils/time";
-import ObsTabBar from "./ObsTabBar.vue";
 import AlertTraceChart from "./AlertTraceChart.vue";
 import { LEVEL_LABEL, LEVEL_OPTIONS, METRIC_LABEL, STATUS_LABEL, formatDuration } from "./alertMeta";
 
@@ -328,20 +318,7 @@ onMounted(refreshAll);
 </script>
 
 <style scoped>
-.alert-page {
-  border: 1px solid var(--surface-card-border);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at top right, var(--color-violet-bg), transparent 28%),
-    var(--surface-card-bg);
-  box-shadow: var(--surface-card-shadow);
-  padding: 24px;
-}
-
-.alert-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.alert-page-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--color-text); }
-.alert-page-sub { margin: 6px 0 0; font-size: 13px; color: var(--color-text-tertiary); }
-.head-btn { height: 40px; padding-inline: 16px; border-radius: 12px; }
+.refresh-btn { margin-left: auto; }
 
 .active-strip { display: flex; align-items: center; gap: 12px; margin: 16px 0; }
 .active-ok { display: flex; align-items: center; gap: 8px; padding: 12px 18px; border-radius: 14px; background: var(--color-success-bg); color: var(--color-success-strong); font-size: 13px; font-weight: 600; }

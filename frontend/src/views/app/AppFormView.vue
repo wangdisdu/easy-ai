@@ -231,25 +231,25 @@
         <section v-if="formModel.app_type === 'rag'" class="form-section">
           <div class="section-head">
             <div>
-              <h3 class="section-title">知识库与检索配置</h3>
+              <h3 class="section-title">RAG 库与检索配置</h3>
               <p class="section-sub">
-                绑定一个或多个知识库；同一应用内 embedding 模型必须一致，否则检索会失败。
+                绑定一个或多个 RAG 库；同一应用内绑定的 RAG 库 embedding 模型必须一致，否则检索会失败。
               </p>
             </div>
           </div>
-          <a-form-item label="知识库" required>
+          <a-form-item label="RAG 库" required>
             <a-select
-              v-model:value="ragConfig.kb_ids"
+              v-model:value="ragConfig.dataset_ids"
               mode="multiple"
-              :options="kbSelectOptions"
-              :loading="kbOptionsLoading"
-              placeholder="选择要检索的知识库"
+              :options="datasetSelectOptions"
+              :loading="datasetOptionsLoading"
+              placeholder="选择要检索的 RAG 库"
               show-search
               option-filter-prop="label"
             />
             <div class="form-hint">
               没有可选项? 先去
-              <a @click="goToKnowledge">知识库管理</a> 创建并完成解析。
+              <a @click="goToKnowledge">知识向量化</a> 创建 RAG 库并完成分类映射。
             </div>
           </a-form-item>
           <a-row :gutter="16">
@@ -638,7 +638,7 @@ const llmConfig = reactive({
 });
 
 const ragConfig = reactive({
-  kb_ids: [] as string[],
+  dataset_ids: [] as string[],
   similarity_threshold: 0.2,
   vector_weight: 0.3,
   top_n: 6,
@@ -654,15 +654,13 @@ const ragConfig = reactive({
   rag_prompt_template: "",
 });
 
-// KB 下拉选项,onMounted 时一次性拉, 缓存供 RAG 应用绑定
-const kbOptions = ref<Array<{ id: string; code: string; name: string; embedding_model: string }>>(
-  [],
-);
-const kbOptionsLoading = ref(false);
-const kbSelectOptions = computed(() =>
-  kbOptions.value.map((kb) => ({
-    value: kb.id,
-    label: `${kb.name} (${kb.code})`,
+// RAG 库下拉选项,onMounted 时一次性拉, 缓存供 RAG 应用绑定
+const ragDatasetOptions = ref<Array<{ id: string; name: string }>>([]);
+const datasetOptionsLoading = ref(false);
+const datasetSelectOptions = computed(() =>
+  ragDatasetOptions.value.map((ds) => ({
+    value: ds.id,
+    label: ds.name,
   })),
 );
 const ragTemplatePlaceholder = `留空使用系统默认。示例:
@@ -674,7 +672,7 @@ Context:
 Question: {{question}}`;
 
 function goToKnowledge() {
-  router.push("/knowledge");
+  router.push("/knowledge?tab=vectorize");
 }
 
 const nl2sqlConfig = reactive({
@@ -839,7 +837,9 @@ function fillFromApp(app: AppResp) {
   }
   if (app.app_type === "rag") {
     Object.assign(ragConfig, {
-      kb_ids: ((config.kb_ids as string[]) || []).slice(),
+      dataset_ids: ((config.dataset_ids as string[]) ||
+        (config.kb_ids as string[]) ||
+        []).slice(),
       similarity_threshold: config.similarity_threshold ?? 0.2,
       vector_weight: config.vector_weight ?? 0.3,
       top_n: config.top_n ?? 6,
@@ -880,25 +880,25 @@ function fillFromApp(app: AppResp) {
 }
 
 async function loadDependencies() {
-  kbOptionsLoading.value = true;
+  datasetOptionsLoading.value = true;
   const [
     { data: providerData },
     { data: toolData },
     { data: skillData },
     { data: categoryData },
-    { data: kbOptionData },
+    { data: datasetOptionData },
     { data: sandboxData },
   ] = await Promise.all([
     llmApi.pageProvider({ page_no: 1, page_size: 200 }),
     toolApi.pageTool({ page_no: 1, page_size: 1000, tool_status: "enabled" }),
     skillApi.pageSkill({ page_no: 1, page_size: 1000, skill_status: "enabled" }),
     categoryApi.listAppCategory(),
-    kbApi.listKbOptions(),
+    kbApi.listRagDatasetOptions(),
     sandboxApi.listSandboxImage(),
   ]);
   sandboxImages.value = sandboxData.data || [];
-  kbOptions.value = kbOptionData.data || [];
-  kbOptionsLoading.value = false;
+  ragDatasetOptions.value = datasetOptionData.data || [];
+  datasetOptionsLoading.value = false;
   providerList.value = providerData.data.filter((item) => item.models.length > 0);
   toolOptions.value = toolData.data.map((item) => ({
     label: `${item.tool_name} (${item.source})`,
