@@ -6,10 +6,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.app.alert_rule_worker import AlertRuleWorker
 from app.app.checkpoint_purger import CheckpointPurger
 from app.app.checkpointer_factory import get_checkpointer_factory
 from app.app.hitl_timeout_worker import HitlTimeoutWorker
 from app.app.kb_status_poller import KbStatusPoller
+from app.app.metric_rollup_worker import MetricRollupWorker
 from app.core.bootstrap import ensure_default_admin
 from app.core.config import settings
 from app.core.rate_limit import MemoryRateLimiter
@@ -53,9 +55,28 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         )
         await kb_poller.start()
 
+    alert_worker: AlertRuleWorker | None = None
+    if settings.alert_eval_enabled:
+        alert_worker = AlertRuleWorker(
+            interval_seconds=settings.alert_eval_interval_seconds,
+        )
+        await alert_worker.start()
+
+    metric_rollup_worker: MetricRollupWorker | None = None
+    if settings.metric_rollup_enabled:
+        metric_rollup_worker = MetricRollupWorker(
+            interval_seconds=settings.metric_rollup_interval_seconds,
+            backfill_minutes=settings.metric_rollup_backfill_minutes,
+        )
+        await metric_rollup_worker.start()
+
     try:
         yield
     finally:
+        if metric_rollup_worker is not None:
+            await metric_rollup_worker.stop()
+        if alert_worker is not None:
+            await alert_worker.stop()
         if kb_poller is not None:
             await kb_poller.stop()
         await hitl_worker.stop()

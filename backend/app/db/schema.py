@@ -725,3 +725,111 @@ class TbApiAccessLog(Base):
     request_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class TbAlertRule(Base):
+    """可观测性告警规则。
+
+    评估器(AlertEvaluator)周期扫描 enabled=1 的规则,把 metric_type 翻译成对
+    tb_app_log 的聚合查询;命中阈值且不在冷却期则写入 tb_alert_record。
+    详见 docs/observability-alert-design.md。
+    """
+
+    __tablename__ = "tb_alert_rule"
+    __table_args__ = (Index("idx_tb_alert_rule_enabled", "enabled"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    rule_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 监控指标: success_rate / p95_latency / error_rate / token_usage_daily
+    #          / request_latency / consecutive_failures / negative_feedback_rate
+    #          / llm_error_count_by_type
+    metric_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 仅 metric_type=llm_error_count_by_type 时有意义;空=任意 LLM 错误
+    target_error_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # 比较运算符: lt / lte / gt / gte / eq
+    operator: Mapped[str] = mapped_column(String(8), nullable=False)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    # 阈值单位: % / ms / tokens
+    threshold_unit: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 监控范围: global / per_app / per_request
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    # 触发后产生的告警级别: critical / warning / info
+    level: Mapped[str] = mapped_column(String(16), nullable=False)
+    window_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    cooldown_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 通知渠道 JSON 数组字符串, 例如 ["inbox"]
+    notify_channels: Mapped[str] = mapped_column(Text, nullable=False)
+    message_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 运行时统计
+    trigger_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    last_triggered_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbAlertRecord(Base):
+    """告警触发记录。评估器命中阈值时写入,「告警中心」页消费。
+
+    rule_name 为触发时的快照,即使规则被删除,历史告警仍可正常展示。
+    """
+
+    __tablename__ = "tb_alert_record"
+    __table_args__ = (Index("idx_tb_alert_record_status", "status", "triggered_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    rule_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rule_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    level: Mapped[str] = mapped_column(String(16), nullable=False)
+    # 状态: firing / resolved / acknowledged
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    metric_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    # scope=per_app 时填具体应用,global 时为空
+    app_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    app_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    observed_value: Mapped[float] = mapped_column(Float, nullable=False)
+    threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    triggered_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    resolved_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    acknowledged_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    acknowledged_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbAppMetricMinute(Base):
+    """应用调用指标的分钟级预聚合。
+
+    由 MetricRollupWorker 周期性从 tb_app_log 聚合而来,服务可观测性面板与
+    告警溯源曲线。派生缓存,可随时按 tb_app_log 重建。列风格对齐
+    tb_integration_quota_day(自然复合主键、精简列、仅 update_time)。
+    详见 docs/observability-metrics-rollup-design.md。
+    """
+
+    __tablename__ = "tb_app_metric_minute"
+    __table_args__ = (
+        PrimaryKeyConstraint("bucket_start", "app_id", name="pk_tb_app_metric_minute"),
+    )
+
+    # 分钟桶起点, Unix ms, 对齐到整分钟 (create_time // 60000 * 60000)
+    bucket_start: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 应用 ID; 0 = 无归属应用(如直连模型网关的调用)
+    app_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    success_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # latency_ms 非空的样本数(avg 分母 / 直方图样本总数)
+    latency_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    latency_sum: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 各延迟区间的计数, JSON int 数组, 见 metric_rollup_service._LATENCY_BUCKETS_MS
+    latency_histogram: Mapped[str] = mapped_column(Text, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)

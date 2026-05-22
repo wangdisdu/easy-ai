@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends
 
+from app.api.alert_record_api import router as alert_record_router
+from app.api.alert_rule_api import router as alert_rule_router
 from app.api.app_api import router as app_router
 from app.api.app_category_api import router as app_category_router
 from app.api.auth_api import router as auth_router
@@ -45,6 +47,8 @@ api_router.include_router(policy_router, dependencies=_login_required)
 api_router.include_router(mcp_router, dependencies=_login_required)
 api_router.include_router(llm_router, dependencies=_login_required)
 api_router.include_router(observability_router, dependencies=_login_required)
+api_router.include_router(alert_rule_router, dependencies=_login_required)
+api_router.include_router(alert_record_router, dependencies=_login_required)
 api_router.include_router(conversation_router, dependencies=_login_required)
 api_router.include_router(memory_router, dependencies=_login_required)
 api_router.include_router(system_setting_router, dependencies=_login_required)

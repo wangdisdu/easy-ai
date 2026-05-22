@@ -25,3 +25,10 @@ class ErrorCode:
     INTEGRATION_BIND_NOT_ALLOWED = 1302
     # 客户端尝试获取已不可见的 API Key 明文
     API_KEY_PLAINTEXT_INVISIBLE = 1303
+
+    # 可观测性 - 告警(详见 docs/observability-alert-design.md)
+    ALERT_RULE_NOT_FOUND = 1400
+    ALERT_RULE_NAME_DUPLICATE = 1401
+    # 指标 / 单位 / 范围组合非法
+    ALERT_RULE_INVALID_CONFIG = 1402
+    ALERT_RECORD_NOT_FOUND = 1403

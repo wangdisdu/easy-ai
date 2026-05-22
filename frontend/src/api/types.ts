@@ -558,3 +558,79 @@ export interface SandboxImageResp {
   create_time: number;
   update_time: number;
 }
+
+// ── 可观测性 · 告警 ──
+
+export interface AlertRuleResp {
+  id: string;
+  rule_name: string;
+  description: string | null;
+  metric_type: string;
+  target_error_type: string | null;
+  operator: string;
+  threshold: number;
+  threshold_unit: string | null;
+  scope: string;
+  level: string;
+  window_minutes: number;
+  cooldown_minutes: number;
+  notify_channels: string[];
+  message_template: string | null;
+  enabled: boolean;
+  trigger_count: number;
+  last_triggered_at: number | null;
+  create_time: number;
+  update_time: number;
+}
+
+export interface AlertRuleEvaluateResp {
+  triggered: boolean;
+  observed_value: number | null;
+  threshold: number;
+  message: string;
+  record_id: string | null;
+}
+
+export interface AlertRecordResp {
+  id: string;
+  rule_id: string;
+  rule_name: string;
+  level: string;
+  status: string;
+  metric_type: string;
+  scope: string;
+  app_id: string | null;
+  app_name: string | null;
+  observed_value: number;
+  threshold: number;
+  message: string;
+  triggered_at: number;
+  resolved_at: number | null;
+  acknowledged_at: number | null;
+  acknowledged_by: string | null;
+  duration_ms: number;
+  create_time: number;
+}
+
+export interface AlertActiveResp {
+  total: number;
+  critical: number;
+  warning: number;
+  info: number;
+  items: AlertRecordResp[];
+}
+
+export interface AlertTracePoint {
+  ts: number;
+  value: number | null;
+}
+
+export interface AlertTraceResp {
+  record_id: string;
+  metric_type: string;
+  threshold: number;
+  triggered_at: number;
+  resolved_at: number | null;
+  step_ms: number;
+  points: AlertTracePoint[];
+}

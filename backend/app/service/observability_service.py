@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import math
 import time
 from typing import Any
 
-from sqlalchemy import case, desc, func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
-from app.db.schema import TbApp, TbAppLog
+from app.db.schema import TbApp, TbAppLog, TbAppMetricMinute
 from app.model.observability_model import (
     AppHealthRow,
     AppTrendSeries,
@@ -19,10 +18,15 @@ from app.model.observability_model import (
     StatDelta,
     TrendResp,
 )
+from app.service.metric_rollup_service import (
+    MetricRollupService,
+    merge_histograms,
+    parse_histogram,
+    percentile_from_histogram,
+)
 
-# 趋势图默认参数：2 小时一个桶，共 12 个点
+# 趋势图默认参数：2 小时一个桶
 _BUCKET_MS = 2 * 60 * 60 * 1000
-_BUCKET_COUNT = 12
 # 应用健康度排行的趋势 SparkLine 点数
 _HEALTH_TREND_POINTS = 7
 
@@ -31,7 +35,15 @@ _APP_COLORS = ["#3B82F6", "#06B6D4", "#F59E0B", "#10B981", "#8B5CF6"]
 
 
 class ObservabilityService:
-    """可观测性总览聚合查询。数据源：tb_app_log。"""
+    """可观测性总览聚合查询。
+
+    指标类查询(总览/趋势/健康度/错误率)读预聚合表 tb_app_metric_minute;
+    模型维度与请求明细仍读原始表 tb_app_log。详见
+    docs/observability-metrics-rollup-design.md。
+    """
+
+    def __init__(self) -> None:
+        self._rollup = MetricRollupService()
 
     # ══════════════════════════════════
     # 核心指标
@@ -39,21 +51,18 @@ class ObservabilityService:
 
     def get_overview_stats(self, db: Session, *, from_ms: int, to_ms: int) -> OverviewStats:
         window = to_ms - from_ms
-        prev_from = from_ms - window
-        prev_to = from_ms
+        current = self._sum_rows(self._rollup.fetch_rows(db, from_ms, to_ms))
+        previous = self._sum_rows(self._rollup.fetch_rows(db, from_ms - window, from_ms))
 
-        current = self._aggregate_basic(db, from_ms, to_ms)
-        previous = self._aggregate_basic(db, prev_from, prev_to)
-
-        total = current["total"]
-        prev_total = previous["total"]
+        total = current["requests"]
+        prev_total = previous["requests"]
         success = current["success"]
         fail = total - success
         success_rate = (success / total * 100) if total else 0.0
         prev_success_rate = (previous["success"] / prev_total * 100) if prev_total else 0.0
 
-        p95 = self._p95_latency(db, from_ms, to_ms)
-        prev_p95 = self._p95_latency(db, prev_from, prev_to)
+        p95 = percentile_from_histogram(current["hist"], 0.95)
+        prev_p95 = percentile_from_histogram(previous["hist"], 0.95)
 
         tokens = current["tokens"]
         prev_tokens = previous["tokens"]
@@ -85,33 +94,17 @@ class ObservabilityService:
             ),
         )
 
-    def _aggregate_basic(self, db: Session, from_ms: int, to_ms: int) -> dict[str, int]:
-        row = db.execute(
-            select(
-                func.count(TbAppLog.id),
-                func.coalesce(func.sum(TbAppLog.success), 0),
-                func.coalesce(func.sum(TbAppLog.total_tokens), 0),
-            ).where(TbAppLog.create_time >= from_ms, TbAppLog.create_time < to_ms)
-        ).one()
-        return {"total": int(row[0] or 0), "success": int(row[1] or 0), "tokens": int(row[2] or 0)}
-
-    def _p95_latency(self, db: Session, from_ms: int, to_ms: int) -> int | None:
-        """应用层近似 P95：拉取全部 latency_ms 排序取第 95 分位。"""
-        rows = db.scalars(
-            select(TbAppLog.latency_ms)
-            .where(
-                TbAppLog.create_time >= from_ms,
-                TbAppLog.create_time < to_ms,
-                TbAppLog.latency_ms.isnot(None),
-            )
-            .order_by(TbAppLog.latency_ms)
-            .limit(10000)
-        ).all()
-        if not rows:
-            return None
-        n = len(rows)
-        idx = min(n - 1, math.ceil(n * 0.95) - 1)
-        return int(rows[idx])
+    @staticmethod
+    def _sum_rows(rows: list[TbAppMetricMinute]) -> dict[str, Any]:
+        """把一组分钟桶汇总成标量 + 合并直方图。"""
+        return {
+            "requests": sum(r.request_count for r in rows),
+            "success": sum(r.success_count for r in rows),
+            "tokens": sum(r.total_tokens for r in rows),
+            "latency_sum": sum(r.latency_sum for r in rows),
+            "latency_count": sum(r.latency_count for r in rows),
+            "hist": merge_histograms([parse_histogram(r.latency_histogram) for r in rows]),
+        }
 
     # ══════════════════════════════════
     # 调用量趋势
@@ -122,49 +115,31 @@ class ObservabilityService:
         bucket_count = max(1, (to_ms - from_ms + bucket_ms - 1) // bucket_ms)
 
         labels: list[str] = []
-        bucket_starts: list[int] = []
         for i in range(bucket_count):
             start = from_ms + i * bucket_ms
-            bucket_starts.append(start)
             t = time.localtime(start / 1000)
             labels.append(f"{t.tm_hour:02d}")
 
-        # 1) 查询 Top N 应用 ID（按调用量降序）
-        top_app_rows = db.execute(
-            select(TbAppLog.app_id, func.count(TbAppLog.id).label("c"))
-            .where(
-                TbAppLog.create_time >= from_ms,
-                TbAppLog.create_time < to_ms,
-                TbAppLog.app_id.isnot(None),
-            )
-            .group_by(TbAppLog.app_id)
-            .order_by(desc("c"))
-            .limit(top)
-        ).all()
-        top_app_ids = [int(r[0]) for r in top_app_rows]
+        rows = self._rollup.fetch_rows(db, from_ms, to_ms)
 
-        # 2) 按桶 + app_id 聚合
-        bucket_expr = ((TbAppLog.create_time - from_ms) / bucket_ms).label("bucket")
-        per_app_buckets: dict[int, list[int]] = {
-            app_id: [0] * bucket_count for app_id in top_app_ids
-        }
+        # Top N 应用(按调用量降序，排除无归属应用 app_id=0)
+        per_app_total: dict[int, int] = {}
+        for r in rows:
+            if r.app_id == 0:
+                continue
+            per_app_total[r.app_id] = per_app_total.get(r.app_id, 0) + r.request_count
+        top_app_ids = sorted(per_app_total, key=lambda a: per_app_total[a], reverse=True)[:top]
+
+        per_app_buckets: dict[int, list[int]] = {a: [0] * bucket_count for a in top_app_ids}
         total_buckets = [0] * bucket_count
-
-        all_rows = db.execute(
-            select(TbAppLog.app_id, bucket_expr, func.count(TbAppLog.id))
-            .where(TbAppLog.create_time >= from_ms, TbAppLog.create_time < to_ms)
-            .group_by(TbAppLog.app_id, "bucket")
-        ).all()
-        for row in all_rows:
-            app_id_val, bucket_idx, cnt = row
-            idx = int(bucket_idx) if bucket_idx is not None else 0
+        for r in rows:
+            idx = (r.bucket_start - from_ms) // bucket_ms
             if idx < 0 or idx >= bucket_count:
                 continue
-            total_buckets[idx] += int(cnt)
-            if app_id_val is not None and int(app_id_val) in per_app_buckets:
-                per_app_buckets[int(app_id_val)][idx] += int(cnt)
+            total_buckets[idx] += r.request_count
+            if r.app_id in per_app_buckets:
+                per_app_buckets[r.app_id][idx] += r.request_count
 
-        # 3) 补充应用名
         app_map = _load_app_map(db, top_app_ids)
         apps: list[AppTrendSeries] = []
         for i, app_id in enumerate(top_app_ids):
@@ -181,7 +156,7 @@ class ObservabilityService:
         return TrendResp(labels=labels, total=total_buckets, apps=apps)
 
     # ══════════════════════════════════
-    # Token 按模型
+    # Token 按模型（仍读原始表：聚合层无 model 维度）
     # ══════════════════════════════════
 
     def get_tokens_by_model(self, db: Session, *, from_ms: int, to_ms: int) -> list[ModelTokenRow]:
@@ -225,42 +200,27 @@ class ObservabilityService:
         sort: str = "calls",
         limit: int = 20,
     ) -> list[AppHealthRow]:
-        success_case = case((TbAppLog.success == 1, 1), else_=0)
-        rows = db.execute(
-            select(
-                TbAppLog.app_id,
-                func.count(TbAppLog.id),
-                func.coalesce(func.sum(success_case), 0),
-                func.coalesce(func.avg(TbAppLog.latency_ms), 0),
-                func.coalesce(func.sum(TbAppLog.total_tokens), 0),
-            )
-            .where(
-                TbAppLog.create_time >= from_ms,
-                TbAppLog.create_time < to_ms,
-                TbAppLog.app_id.isnot(None),
-            )
-            .group_by(TbAppLog.app_id)
-        ).all()
+        rows = self._rollup.fetch_rows(db, from_ms, to_ms)
+        by_app = _group_by_app(rows)
 
-        app_ids = [int(r[0]) for r in rows]
-        app_map = _load_app_map(db, app_ids)
-
-        # 每个应用的 P95（应用层近似）
-        p95_map: dict[int, int | None] = {
-            app_id: self._p95_latency_for_app(db, app_id, from_ms, to_ms) for app_id in app_ids
-        }
-
-        # 每个应用的趋势（最近 N 个时间点）
-        trend_map = self._app_trend_map(db, app_ids, from_ms, to_ms, _HEALTH_TREND_POINTS)
+        trend_bucket_ms = max(1, (to_ms - from_ms) // _HEALTH_TREND_POINTS)
+        app_map = _load_app_map(db, list(by_app.keys()))
 
         result: list[AppHealthRow] = []
-        for r in rows:
-            app_id = int(r[0])
-            calls = int(r[1] or 0)
-            success = int(r[2] or 0)
-            avg_latency = float(r[3] or 0)
-            tokens = int(r[4] or 0)
+        for app_id, app_rows in by_app.items():
+            agg = self._sum_rows(app_rows)
+            calls = agg["requests"]
+            success = agg["success"]
             success_rate = (success / calls * 100) if calls else 0.0
+            lat_count = agg["latency_count"]
+            avg_latency = (agg["latency_sum"] / lat_count) if lat_count else 0.0
+
+            trend = [0] * _HEALTH_TREND_POINTS
+            for r in app_rows:
+                idx = (r.bucket_start - from_ms) // trend_bucket_ms
+                if 0 <= idx < _HEALTH_TREND_POINTS:
+                    trend[idx] += r.request_count
+
             info = app_map.get(app_id)
             result.append(
                 AppHealthRow(
@@ -269,11 +229,11 @@ class ObservabilityService:
                     app_type=info.app_type if info else "-",
                     calls=calls,
                     success_rate=round(success_rate, 2),
-                    p95_latency_ms=p95_map.get(app_id),
+                    p95_latency_ms=percentile_from_histogram(agg["hist"], 0.95),
                     avg_latency_ms=int(avg_latency) if avg_latency else None,
-                    total_tokens=tokens,
+                    total_tokens=agg["tokens"],
                     feedback_rate=None,
-                    trend=trend_map.get(app_id, [0] * _HEALTH_TREND_POINTS),
+                    trend=trend,
                 )
             )
 
@@ -284,57 +244,6 @@ class ObservabilityService:
         # feedback_rate 维度在 P0 阶段无数据，保持原顺序
         return result[:limit]
 
-    def _p95_latency_for_app(
-        self, db: Session, app_id: int, from_ms: int, to_ms: int
-    ) -> int | None:
-        rows = db.scalars(
-            select(TbAppLog.latency_ms)
-            .where(
-                TbAppLog.app_id == app_id,
-                TbAppLog.create_time >= from_ms,
-                TbAppLog.create_time < to_ms,
-                TbAppLog.latency_ms.isnot(None),
-            )
-            .order_by(TbAppLog.latency_ms)
-            .limit(5000)
-        ).all()
-        if not rows:
-            return None
-        n = len(rows)
-        idx = min(n - 1, math.ceil(n * 0.95) - 1)
-        return int(rows[idx])
-
-    def _app_trend_map(
-        self,
-        db: Session,
-        app_ids: list[int],
-        from_ms: int,
-        to_ms: int,
-        points: int,
-    ) -> dict[int, list[int]]:
-        if not app_ids:
-            return {}
-        bucket_ms = max(1, (to_ms - from_ms) // points)
-        bucket_expr = ((TbAppLog.create_time - from_ms) / bucket_ms).label("bucket")
-        rows = db.execute(
-            select(TbAppLog.app_id, bucket_expr, func.count(TbAppLog.id))
-            .where(
-                TbAppLog.app_id.in_(app_ids),
-                TbAppLog.create_time >= from_ms,
-                TbAppLog.create_time < to_ms,
-            )
-            .group_by(TbAppLog.app_id, "bucket")
-        ).all()
-        result: dict[int, list[int]] = {app_id: [0] * points for app_id in app_ids}
-        for app_id_val, bucket_idx, cnt in rows:
-            if app_id_val is None:
-                continue
-            idx = int(bucket_idx) if bucket_idx is not None else 0
-            if idx < 0 or idx >= points:
-                continue
-            result[int(app_id_val)][idx] += int(cnt)
-        return result
-
     # ══════════════════════════════════
     # 错误率排行
     # ══════════════════════════════════
@@ -342,29 +251,14 @@ class ObservabilityService:
     def get_errors_by_app(
         self, db: Session, *, from_ms: int, to_ms: int, limit: int = 20
     ) -> list[ErrorAppRow]:
-        fail_case = case((TbAppLog.success == 0, 1), else_=0)
-        rows = db.execute(
-            select(
-                TbAppLog.app_id,
-                func.count(TbAppLog.id),
-                func.coalesce(func.sum(fail_case), 0),
-            )
-            .where(
-                TbAppLog.create_time >= from_ms,
-                TbAppLog.create_time < to_ms,
-                TbAppLog.app_id.isnot(None),
-            )
-            .group_by(TbAppLog.app_id)
-        ).all()
-
-        app_ids = [int(r[0]) for r in rows]
-        app_map = _load_app_map(db, app_ids)
+        rows = self._rollup.fetch_rows(db, from_ms, to_ms)
+        by_app = _group_by_app(rows)
+        app_map = _load_app_map(db, list(by_app.keys()))
 
         result: list[ErrorAppRow] = []
-        for r in rows:
-            app_id = int(r[0])
-            calls = int(r[1] or 0)
-            errors = int(r[2] or 0)
+        for app_id, app_rows in by_app.items():
+            calls = sum(r.request_count for r in app_rows)
+            errors = calls - sum(r.success_count for r in app_rows)
             if errors == 0:
                 continue
             rate = (errors / calls * 100) if calls else 0.0
@@ -383,7 +277,7 @@ class ObservabilityService:
         return result[:limit]
 
     # ══════════════════════════════════
-    # 最近请求
+    # 最近请求（仍读原始表：明细数据无法聚合）
     # ══════════════════════════════════
 
     def get_recent_requests(self, db: Session, *, limit: int = 20) -> list[RecentRequestRow]:
@@ -424,6 +318,16 @@ class _AppInfo:
     def __init__(self, name: str, app_type: str) -> None:
         self.name = name
         self.app_type = app_type
+
+
+def _group_by_app(rows: list[TbAppMetricMinute]) -> dict[int, list[TbAppMetricMinute]]:
+    """按 app_id 分组,排除无归属应用(app_id=0)。"""
+    grouped: dict[int, list[TbAppMetricMinute]] = {}
+    for r in rows:
+        if r.app_id == 0:
+            continue
+        grouped.setdefault(r.app_id, []).append(r)
+    return grouped
 
 
 def _load_app_map(db: Session, app_ids: list[int]) -> dict[int, _AppInfo]:

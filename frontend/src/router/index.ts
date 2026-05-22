@@ -185,6 +185,30 @@ const router = createRouter({
           component: () => import("@/views/observability/ObservabilityView.vue"),
         },
         {
+          path: "observability/alert",
+          name: "observability-alerts",
+          meta: { title: "告警中心" },
+          component: () => import("@/views/observability/AlertCenterView.vue"),
+        },
+        {
+          path: "observability/alert-rule",
+          name: "observability-alert-rules",
+          meta: { title: "告警规则" },
+          component: () => import("@/views/observability/AlertRuleListView.vue"),
+        },
+        {
+          path: "observability/alert-rule/create",
+          name: "alert-rule-create",
+          meta: { title: "新建告警规则" },
+          component: () => import("@/views/observability/AlertRuleFormView.vue"),
+        },
+        {
+          path: "observability/alert-rule/:id/edit",
+          name: "alert-rule-edit",
+          meta: { title: "编辑告警规则" },
+          component: () => import("@/views/observability/AlertRuleFormView.vue"),
+        },
+        {
           path: "setting",
           name: "setting",
           meta: {

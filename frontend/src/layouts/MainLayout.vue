@@ -103,6 +103,7 @@
                 </svg>
               </a-button>
             </a-tooltip>
+            <AlertsBell />
             <a-dropdown>
               <a-button type="text" class="header-user-trigger">
                 <span class="header-user-avatar">{{ userInitial }}</span>
@@ -140,6 +141,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
 import logoAi from "@/assets/icons/logo-ai.svg";
 import AppIcon from "@/components/AppIcon.vue";
+import AlertsBell from "@/components/AlertsBell.vue";
 
 const route = useRoute();
 const router = useRouter();

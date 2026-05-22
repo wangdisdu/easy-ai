@@ -17,6 +17,10 @@
       </div>
     </div>
 
+    <div style="margin: 4px 0 18px">
+      <ObsTabBar />
+    </div>
+
     <a-spin :spinning="loading" wrapper-class-name="obs-spin">
       <!-- 1. 核心指标卡 -->
       <div class="stat-grid">
@@ -236,6 +240,7 @@ import {
 import AreaChart from "@/components/charts/AreaChart.vue";
 import DonutChart from "@/components/charts/DonutChart.vue";
 import SparkLine from "@/components/charts/SparkLine.vue";
+import ObsTabBar from "./ObsTabBar.vue";
 import * as obsApi from "@/api/observability";
 import type {
   AppHealthRow,

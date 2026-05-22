@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     # HITL 超时扫描频率
     hitl_timeout_check_interval_seconds: int = Field(default=30)
 
+    # 告警规则评估后台任务（详见 docs/observability-alert-design.md）
+    alert_eval_enabled: bool = Field(default=True)
+    alert_eval_interval_seconds: int = Field(default=60)
+
+    # 指标聚合后台任务（详见 docs/observability-metrics-rollup-design.md）
+    metric_rollup_enabled: bool = Field(default=True)
+    metric_rollup_interval_seconds: int = Field(default=60)
+    # 每轮回算的尾部分钟数, 用于吸收迟到数据
+    metric_rollup_backfill_minutes: int = Field(default=5)
+
     # OpenSandbox 隔离执行后端（详见 docs/sandbox-design.md §7）
     # app_config.runtime_backend=opensandbox/composite 时生效；默认 state 不需要。
     sandbox_enabled: bool = Field(default=False)
