@@ -1,9 +1,9 @@
 [submodule "Flowise"]
 	path = Flowise
-	url = git@github.com:wangdisdu/flowise.git
+	url = git@code.eoitek.net:monitor/jax/flowise.git
 [submodule "langfuse"]
 	path = langfuse
-	url = git@github.com:wangdisdu/langfuse.git
+	url = git@code.eoitek.net:monitor/jax/langfuse.git
 [submodule "ragflow"]
 	path = ragflow
-	url = git@github.com:wangdisdu/ragflow.git
+	url = git@code.eoitek.net:monitor/jax/ragflow.git
