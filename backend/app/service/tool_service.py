@@ -469,6 +469,11 @@ class ToolService:
         return ToolResp.from_entity(entity)
 
     def page_tool(self, db: Session, req: ToolPageReq) -> tuple[list[ToolResp], int]:
+        """分页查 tb_tool。默认排除 source='builtin' —— 它们是 0016/0017 种的
+        治理元数据,**不是用户可绑定的工具**(框架/computer_tools 在运行时直接挂载,
+        见 docs/sandbox-design.md §5)。前端「内置工具」展示走 ``listBuiltinTools``
+        硬编码列表,与此处独立。如需诊断查 builtin 行,显式传 ``source='builtin'``。
+        """
         stmt = select(TbTool)
         count_stmt = select(func.count(TbTool.id))
 
@@ -478,6 +483,9 @@ class ToolService:
             conditions.append(or_(TbTool.tool_name.like(kw), TbTool.description.like(kw)))
         if req.source:
             conditions.append(TbTool.source == req.source)
+        else:
+            # 没显式过滤时把 builtin 治理记录从用户视野里隐藏
+            conditions.append(TbTool.source != BUILTIN_SOURCE)
         if req.tool_status:
             conditions.append(TbTool.tool_status == req.tool_status)
 

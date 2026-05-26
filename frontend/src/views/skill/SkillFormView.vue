@@ -132,7 +132,7 @@ import { message } from "ant-design-vue";
 import * as categoryApi from "@/api/appCategory";
 import * as skillApi from "@/api/skill";
 import * as toolApi from "@/api/tool";
-import type { BuiltinToolResp, SkillToolItem, ToolResp } from "@/api/types";
+import type { SkillToolItem, ToolResp } from "@/api/types";
 
 const router = useRouter();
 const route = useRoute();
@@ -167,7 +167,6 @@ const toolSourceFilter = ref("all");
 
 const toolSourceFilters = [
   { label: "全部", value: "all" },
-  { label: "内置", value: "builtin" },
   { label: "MCP", value: "mcp" },
   { label: "API", value: "api" },
 ];
@@ -209,19 +208,18 @@ function removeTool(t: SkillToolItem) {
 }
 
 async function loadAvailableTools() {
-  const [builtinRes, dbRes] = await Promise.all([
-    toolApi.listBuiltinTools(),
-    toolApi.pageTool({ page_no: 1, page_size: 1000 }),
-  ]);
-  const builtins: AvailTool[] = builtinRes.data.data.map((b: BuiltinToolResp) => ({
-    key: `builtin:${b.tool_name}`, tool_id: "0", tool_name: b.tool_name, source: "builtin", description: b.description,
-  }));
-  const dbTools: AvailTool[] = dbRes.data.data
+  // 只列用户可绑定的 mcp/api 工具;内置工具由框架/computer_tools 运行时挂载,
+  // 不走 binding 路径,不在此处列出(后端 page_tool 默认也排除 source='builtin')。
+  const { data } = await toolApi.pageTool({ page_no: 1, page_size: 1000 });
+  allAvailableTools.value = data.data
     .filter((t: ToolResp) => t.tool_status === "enabled")
     .map((t: ToolResp) => ({
-      key: `${t.source}:${t.tool_name}`, tool_id: t.id, tool_name: t.tool_name, source: t.source, description: t.description,
+      key: `${t.source}:${t.tool_name}`,
+      tool_id: t.id,
+      tool_name: t.tool_name,
+      source: t.source,
+      description: t.description,
     }));
-  allAvailableTools.value = [...builtins, ...dbTools];
 }
 
 async function loadEditData() {
