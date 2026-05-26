@@ -837,9 +837,7 @@ function fillFromApp(app: AppResp) {
   }
   if (app.app_type === "rag") {
     Object.assign(ragConfig, {
-      dataset_ids: ((config.dataset_ids as string[]) ||
-        (config.kb_ids as string[]) ||
-        []).slice(),
+      dataset_ids: ((config.dataset_ids as string[]) || []).slice(),
       similarity_threshold: config.similarity_threshold ?? 0.2,
       vector_weight: config.vector_weight ?? 0.3,
       top_n: config.top_n ?? 6,

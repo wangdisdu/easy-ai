@@ -33,7 +33,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ALGORITHM: HS256
       SNOWFLAKE_WORKER_ID: ${SNOWFLAKE_WORKER_ID:-1}
-      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-true}
       LANGFUSE_HOST: http://langfuse-web:3000
       # 直接复用 langfuse 首次 init 的 project keys,单一事实源
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
@@ -46,8 +46,8 @@ services:
       RAGFLOW_BASE_URL: http://ragflow:9380
       RAGFLOW_SHARED_SECRET: ${RAGFLOW_SHARED_SECRET}
       RAGFLOW_TIMEOUT_SEC: ${RAGFLOW_TIMEOUT_SEC:-30}
-      # 沙盒后端(OpenSandbox)。默认关闭;启用需 docker compose --profile sandbox。
-      SANDBOX_ENABLED: ${SANDBOX_ENABLED:-false}
+      # 沙盒后端(OpenSandbox)。默认开启;deploy.sh 自动加 --profile sandbox。
+      SANDBOX_ENABLED: ${SANDBOX_ENABLED:-true}
       SANDBOX_SERVER_URL: ${SANDBOX_SERVER_URL:-http://opensandbox-server:8090}
       SANDBOX_API_KEY: ${SANDBOX_API_KEY:-}
     volumes:
@@ -219,8 +219,8 @@ services:
       # ── EasyAI trusted-header 鉴权(fork 注入,详见 §3) ──
       EASYAI_TRUSTED_HEADER: "true"
       EASYAI_SHARED_SECRET: ${RAGFLOW_SHARED_SECRET}
-      EASYAI_BOOTSTRAP_EMAIL: ${EASYAI_BOOTSTRAP_EMAIL:-easyai@system.local}
-      EASYAI_BOOTSTRAP_NICKNAME: ${EASYAI_BOOTSTRAP_NICKNAME:-easyai-system}
+      EASYAI_BOOTSTRAP_EMAIL: ${EASYAI_BOOTSTRAP_EMAIL:-admin@easyai.com}
+      EASYAI_BOOTSTRAP_NICKNAME: ${EASYAI_BOOTSTRAP_NICKNAME:-admin}
       EASYAI_BOOTSTRAP_PASSWORD: ${EASYAI_BOOTSTRAP_PASSWORD:-}
       # ── 其他 ──
       TZ: Asia/Shanghai
@@ -390,7 +390,7 @@ services:
     profiles: ["sandbox"]
     ports:
       # 暴露给宿主,便于端到端验证;backend 走 compose 网络 service 名访问。
-      - "${SANDBOX_SERVER_PORT:-8090}:8090"
+      - "${SANDBOX_SERVER_PORT:-18050}:8090"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./opensandbox/config.template.toml:/etc/opensandbox/config.template.toml:ro

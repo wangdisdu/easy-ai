@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     litellm_gateway_key: str | None = Field(default=None)
 
     # Langfuse 观测配置
-    langfuse_enabled: bool = Field(default=False)
+    langfuse_enabled: bool = Field(default=True)
     langfuse_host: str = Field(default="http://localhost:3000")
     langfuse_public_key: str | None = Field(default=None)
     langfuse_secret_key: str | None = Field(default=None)
@@ -56,20 +56,20 @@ class Settings(BaseSettings):
 
     # OpenSandbox 隔离执行后端（详见 docs/sandbox-design.md §7）
     # app_config.runtime_backend=opensandbox/composite 时生效；默认 state 不需要。
-    sandbox_enabled: bool = Field(default=False)
-    sandbox_server_url: str = Field(default="http://127.0.0.1:8910")
+    sandbox_enabled: bool = Field(default=True)
+    sandbox_server_url: str = Field(default="http://127.0.0.1:18050")
     sandbox_api_key: str | None = Field(default=None)
     sandbox_default_execute_timeout: int = Field(default=300)
     sandbox_warm_pool_size: int = Field(default=0)
 
     # Flowise 嵌入接入（M1）
-    flowise_enabled: bool = Field(default=False)
+    flowise_enabled: bool = Field(default=True)
     flowise_internal_url: str = Field(default="http://127.0.0.1:3001")
     flowise_shared_secret: str = Field(default="change-me-easyai-flowise")
     flowise_default_workspace: str = Field(default="")
 
     # RAGFlow 知识库引擎（fork + trusted-header，详见 docs/knowledge-rag-integration-design.md §3）
-    ragflow_enabled: bool = Field(default=False)
+    ragflow_enabled: bool = Field(default=True)
     ragflow_base_url: str = Field(default="http://127.0.0.1:9380")
     ragflow_shared_secret: str = Field(default="change-me-easyai-ragflow")
     ragflow_timeout_sec: float = Field(default=30.0)

@@ -4,7 +4,7 @@
     retrieve → [可选 summary 精炼] → 拼上下文 + 历史 → 调主 LLM → 返回
 
 app_config(``tb_app.app_config`` JSON)期望的键:
-- ``kb_ids: list[str]`` 必填,绑定的 KB id 列表(easy-ai 雪花)
+- ``dataset_ids: list[str]`` 必填,绑定的 RAG 库 id 列表(easy-ai 雪花)
 - ``top_n / top_k: int`` 默认 5
 - ``similarity_threshold: float`` 默认 0.2
 - ``vector_weight: float`` 默认 0.3
@@ -113,11 +113,9 @@ class RagApp:
         if app.app_type != "rag":
             raise ServiceError(ErrorCode.BAD_REQUEST, "app is not rag type")
         app_config = self._app_runtime.get_app_config(db, req.app_id)
-        kb_ids = self._extract_kb_ids(app_config)
-        if not kb_ids:
-            raise ServiceError(
-                ErrorCode.BAD_REQUEST, "rag app must bind at least one knowledge base"
-            )
+        dataset_ids = self._extract_dataset_ids(app_config)
+        if not dataset_ids:
+            raise ServiceError(ErrorCode.BAD_REQUEST, "rag app must bind at least one RAG dataset")
 
         # 多轮:从 messages 末尾抽 user query;单轮:直接用 req.query
         query, history = self._resolve_query_and_history(req)
@@ -127,7 +125,7 @@ class RagApp:
         started_at = time.perf_counter()
 
         # 1. retrieve
-        retrieve_req = self._build_retrieve_req(app_config, kb_ids, query)
+        retrieve_req = self._build_retrieve_req(app_config, dataset_ids, query)
         retrieved = self._kb_retrieve_service.retrieve(db, retrieve_req, req_ctx)
         retrieve_latency_ms = int((time.perf_counter() - started_at) * 1000)
 
@@ -182,10 +180,10 @@ class RagApp:
         references = [self._hit_to_reference(hit) for hit in retrieved.hits]
 
         logger.info(
-            "[rag] action=run app_id=%s kb_ids=%s top_k=%d hits=%d "
+            "[rag] action=run app_id=%s dataset_ids=%s top_k=%d hits=%d "
             "summary=%s retrieve_ms=%d summary_ms=%d llm_ms=%d total_ms=%d",
             req.app_id,
-            kb_ids,
+            dataset_ids,
             retrieve_req.top_k,
             len(retrieved.hits),
             summary_used,
@@ -315,17 +313,17 @@ class RagApp:
             if app.app_type != "rag":
                 raise ServiceError(ErrorCode.BAD_REQUEST, "app is not rag type")
             app_config = self._app_runtime.get_app_config(db, req.app_id)
-            kb_ids = self._extract_kb_ids(app_config)
-            if not kb_ids:
+            dataset_ids = self._extract_dataset_ids(app_config)
+            if not dataset_ids:
                 raise ServiceError(
                     ErrorCode.BAD_REQUEST,
-                    "rag app must bind at least one knowledge base",
+                    "rag app must bind at least one RAG dataset",
                 )
             query, history = self._resolve_query_and_history(req)
             if not query:
                 raise ServiceError(ErrorCode.BAD_REQUEST, "rag run requires a user query")
 
-            retrieve_req = self._build_retrieve_req(app_config, kb_ids, query)
+            retrieve_req = self._build_retrieve_req(app_config, dataset_ids, query)
             retrieved = self._kb_retrieve_service.retrieve(db, retrieve_req, req_ctx)
 
             summary_used = False
@@ -398,14 +396,8 @@ class RagApp:
         return req.query.strip(), []
 
     @staticmethod
-    def _extract_kb_ids(app_config: dict[str, Any]) -> list[str]:
-        # v2: RAG 应用检索面向 RAG 库; 兼容旧 kb_ids 键(P4 统一改造命名)
-        raw = (
-            app_config.get("dataset_ids")
-            or app_config.get("datasetIds")
-            or app_config.get("kb_ids")
-            or app_config.get("kbIds")
-        )
+    def _extract_dataset_ids(app_config: dict[str, Any]) -> list[str]:
+        raw = app_config.get("dataset_ids") or app_config.get("datasetIds")
         if not isinstance(raw, list):
             return []
         return [str(x) for x in raw if x]

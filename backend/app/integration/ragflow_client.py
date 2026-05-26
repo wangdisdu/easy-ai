@@ -10,7 +10,7 @@
     X-EasyAI-Sign  - hex(hmac_sha256(ragflow_shared_secret, f"{user}.{ts}"))
 
 无 Token、无 Session、无 RSA 密码加密：fork 后的 RAGFlow 看到合法签名即把
-请求绑定到默认管理员账户 ``easyai@system.local``，下游 ``@login_required`` /
+请求绑定到默认管理员账户 ``admin@easyai.com``，下游 ``@login_required`` /
 ``@token_required`` 一律放行。
 
 只暴露 KB 业务联动需要的最小接口；签名工具单独抽出便于单测。

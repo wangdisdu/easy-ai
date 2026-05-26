@@ -9,7 +9,7 @@
 - 移动 = 重写自身 + 全部后代的 id_path / level
 - 同级(kb_id + parent_id)下 name 唯一
 
-详见 docs/knowledge-rag-integration-design.md。
+详见 docs/knowledge-v2-design.md。
 """
 
 from __future__ import annotations

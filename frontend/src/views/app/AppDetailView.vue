@@ -984,10 +984,7 @@ const summaryRows = computed(() => {
     return [
       {
         label: "RAG 库",
-        value:
-          ((config.dataset_ids as string[]) || (config.kb_ids as string[]) || []).join(
-            ", ",
-          ) || "-",
+        value: ((config.dataset_ids as string[]) || []).join(", ") || "-",
       },
       { label: "相似度阈值", value: String(config.similarity_threshold ?? "-") },
       { label: "Top N", value: String(config.top_n ?? "-") },

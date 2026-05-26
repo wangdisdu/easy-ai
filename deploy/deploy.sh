@@ -60,7 +60,7 @@ case "${cmd}" in
         echo
         echo "Flowise 默认 Organization+Workspace 会在首次启动时自动创建,无需手动引导。"
         echo "RAGFlow 镜像由 ragflow/ submodule 本地 build (首次约 5-10 分钟)。"
-        echo "  - 默认管理员 easyai@system.local 由 ragflow 容器启动期自动创建,无需手动 bootstrap。"
+        echo "  - 默认管理员 admin@easyai.com 由 ragflow 容器启动期自动创建,无需手动 bootstrap。"
         ;;
     down)
         "${COMPOSE[@]}" down "$@"

@@ -8,87 +8,61 @@
       description="从外部数据源把知识导入到知识库。本期支持文件上传;Ones / API 拉取 / API 推送将在后续迭代接入。"
     />
 
-    <div class="wizard">
-      <!-- 数据源 -->
-      <a-card title="① 选择数据源" size="small" class="card">
-        <div class="source-grid">
-          <div class="source-item source-item--active">
-            <div class="source-name">文件上传</div>
-            <div class="source-desc">上传本地 PDF / DOCX / XLSX / MD / TXT / CSV / JSON / 图片</div>
-            <CheckCircleFilled class="source-check" />
-          </div>
-          <div class="source-item source-item--disabled">
-            <div class="source-name">Ones 知识库</div>
-            <div class="source-desc">后续迭代</div>
-          </div>
-          <div class="source-item source-item--disabled">
-            <div class="source-name">API 主动拉取</div>
-            <div class="source-desc">后续迭代</div>
-          </div>
-          <div class="source-item source-item--disabled">
-            <div class="source-name">API 接收推送</div>
-            <div class="source-desc">后续迭代</div>
-          </div>
-        </div>
-      </a-card>
+    <a-card title="上传文件并选择目标" size="small" class="card">
+      <a-upload-dragger
+        v-model:file-list="fileList"
+        :before-upload="beforeUpload"
+        :multiple="true"
+        :disabled="uploading"
+      >
+        <p class="upload-icon"><InboxOutlined /></p>
+        <p class="upload-text">拖拽文件到此处或点击选择</p>
+        <p class="upload-hint">单文件 ≤ 50MB,单次最多 20 个</p>
+      </a-upload-dragger>
 
-      <!-- 上传 + 目标 -->
-      <a-card title="② 上传文件并选择目标" size="small" class="card">
-        <a-upload-dragger
-          v-model:file-list="fileList"
-          :before-upload="beforeUpload"
-          :multiple="true"
-          :disabled="uploading"
+      <a-form layout="vertical" class="form">
+        <a-form-item label="目标知识库" required>
+          <a-select
+            v-model:value="targetKb"
+            :options="kbOptions"
+            placeholder="选择知识库"
+            :disabled="uploading"
+            style="width: 100%"
+            @change="onKbChange"
+          />
+        </a-form-item>
+        <a-form-item label="目标分类">
+          <a-tree-select
+            v-model:value="targetCategory"
+            :tree-data="categoryTreeData"
+            :disabled="uploading || !targetKb"
+            tree-default-expand-all
+            placeholder="选择分类"
+            style="width: 100%"
+          />
+          <div class="form-hint">分类已映射 RAG 库时,上传后自动进入向量化队列</div>
+        </a-form-item>
+      </a-form>
+
+      <div class="actions">
+        <a-button
+          type="primary"
+          :loading="uploading"
+          :disabled="!fileList.length || !targetKb"
+          @click="onSubmit"
         >
-          <p class="upload-icon"><InboxOutlined /></p>
-          <p class="upload-text">拖拽文件到此处或点击选择</p>
-          <p class="upload-hint">单文件 ≤ 50MB,单次最多 20 个</p>
-        </a-upload-dragger>
+          开始导入（{{ fileList.length }}）
+        </a-button>
+      </div>
 
-        <a-form layout="vertical" class="form">
-          <a-form-item label="目标知识库" required>
-            <a-select
-              v-model:value="targetKb"
-              :options="kbOptions"
-              placeholder="选择知识库"
-              :disabled="uploading"
-              style="width: 100%"
-              @change="onKbChange"
-            />
-          </a-form-item>
-          <a-form-item label="目标分类">
-            <a-tree-select
-              v-model:value="targetCategory"
-              :tree-data="categoryTreeData"
-              :disabled="uploading || !targetKb"
-              tree-default-expand-all
-              placeholder="选择分类"
-              style="width: 100%"
-            />
-            <div class="form-hint">分类已映射 RAG 库时,上传后自动进入向量化队列</div>
-          </a-form-item>
-        </a-form>
-
-        <div class="actions">
-          <a-button
-            type="primary"
-            :loading="uploading"
-            :disabled="!fileList.length || !targetKb"
-            @click="onSubmit"
-          >
-            开始导入（{{ fileList.length }}）
-          </a-button>
-        </div>
-
-        <a-alert
-          v-if="lastResult"
-          :type="lastResult.ok ? 'success' : 'error'"
-          :message="lastResult.msg"
-          show-icon
-          class="result"
-        />
-      </a-card>
-    </div>
+      <a-alert
+        v-if="lastResult"
+        :type="lastResult.ok ? 'success' : 'error'"
+        :message="lastResult.msg"
+        show-icon
+        class="result"
+      />
+    </a-card>
   </div>
 </template>
 
@@ -96,7 +70,7 @@
 import { onMounted, ref } from "vue";
 import { message } from "ant-design-vue";
 import type { UploadFile, UploadProps } from "ant-design-vue";
-import { CheckCircleFilled, InboxOutlined } from "@ant-design/icons-vue";
+import { InboxOutlined } from "@ant-design/icons-vue";
 import * as kbApi from "@/api/kb";
 import type { KbCategoryNode } from "@/api/types";
 
@@ -177,8 +151,6 @@ onMounted(async () => {
 
 <style scoped>
 .integration-tab {
-  max-width: 760px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -186,48 +158,8 @@ onMounted(async () => {
 .intro {
   border-radius: 10px;
 }
-.wizard {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
 .card {
   border-radius: 12px;
-}
-.source-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-}
-.source-item {
-  position: relative;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: var(--surface-soft);
-}
-.source-item--active {
-  border-color: var(--color-info-strong);
-  background: var(--surface-info-soft);
-}
-.source-item--disabled {
-  opacity: 0.5;
-}
-.source-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-.source-desc {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  margin-top: 4px;
-}
-.source-check {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  color: var(--color-info-strong);
 }
 .upload-icon {
   font-size: 38px;

@@ -19,6 +19,14 @@
               <DatabaseOutlined class="kb-item-icon" />
               <span class="kb-item-name">{{ kb.name }}</span>
               <span class="kb-item-count">{{ kb.doc_count }}</span>
+              <a-dropdown v-if="canEdit" :trigger="['click']">
+                <MoreOutlined class="kb-more" @click.stop />
+                <template #overlay>
+                  <a-menu @click="(e: any) => onKbMenu(e.key, kb)">
+                    <a-menu-item key="delete" danger>删除知识库</a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
             </div>
             <div v-if="selectedKbId === kb.id" class="cat-list">
               <div
@@ -707,6 +715,32 @@ function openCreateCategory() {
   catModalOpen.value = true;
 }
 
+function onKbMenu(action: string, kb: KbResp) {
+  if (action === "delete") confirmDeleteKb(kb);
+}
+
+async function confirmDeleteKb(kb: KbResp) {
+  Modal.confirm({
+    title: `确定删除知识库「${kb.name}」?`,
+    content: `将级联删除该库下 ${kb.category_count} 个分类、${kb.doc_count} 篇文档(含原文 blob 与 RAGFlow 文档),无法撤销。`,
+    okText: "删除",
+    okType: "danger",
+    cancelText: "取消",
+    async onOk() {
+      await kbApi.deleteKb(kb.id);
+      message.success("知识库已删除");
+      if (selectedKbId.value === kb.id) {
+        selectedKbId.value = null;
+        selectedCatId.value = null;
+        selectedDoc.value = null;
+        docs.value = [];
+        categoryTree.value = [];
+      }
+      await loadKbList();
+    },
+  });
+}
+
 function onCatMenu(action: string, cat: KbCategoryNode) {
   if (action === "rename") {
     catModalMode.value = "rename";
@@ -926,8 +960,14 @@ loadKbList();
 .cat-count {
   font-size: 11px;
 }
-.cat-more {
+.cat-more,
+.kb-more {
+  color: var(--color-text-tertiary);
   padding: 0 2px;
+}
+.cat-more:hover,
+.kb-more:hover {
+  color: var(--color-text);
 }
 .cat-add {
   color: var(--color-info-strong);
