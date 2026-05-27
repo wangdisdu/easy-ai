@@ -2,6 +2,7 @@ import request from "./request";
 import type {
   ApiPageResp,
   ApiResp,
+  SkillFileItem,
   SkillResp,
   SkillToolItem,
   SkillVersionResp,
@@ -10,17 +11,21 @@ import type {
 export interface SkillCreateBody {
   name: string;
   description?: string;
+  emoji?: string;
   category_ids?: string[];
   instruction: string;
   tools?: SkillToolItem[];
+  files?: SkillFileItem[];
 }
 
 export interface SkillUpdateBody {
   name?: string;
   description?: string;
+  emoji?: string;
   category_ids?: string[];
   instruction?: string;
   tools?: SkillToolItem[];
+  files?: SkillFileItem[];
 }
 
 export function pageSkill(params: {
@@ -63,4 +68,12 @@ export function publishSkill(id: string, body: { version: string; version_note?:
 
 export function listSkillVersions(id: string) {
   return request.get<ApiResp<SkillVersionResp[]>>(`/api/v1/skill/${id}/version`);
+}
+
+export function uploadSkillZip(zip: File) {
+  const fd = new FormData();
+  fd.append("file", zip);
+  return request.post<ApiResp<SkillResp>>("/api/v1/skill/upload-zip", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
 }

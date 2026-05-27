@@ -19,8 +19,9 @@
       <template v-if="skill">
         <!-- Header Card -->
         <div class="hero-card">
-          <div class="hero-icon">
-            <ThunderboltOutlined />
+          <div class="hero-icon" :class="{ 'hero-icon--emoji': !!skill.emoji }">
+            <span v-if="skill.emoji" class="hero-emoji">{{ skill.emoji }}</span>
+            <ThunderboltOutlined v-else />
           </div>
           <div class="hero-body">
             <div class="hero-name-row">
@@ -76,6 +77,22 @@
             </div>
           </div>
 
+          <!-- Bundled Files -->
+          <div v-if="skill.files && skill.files.length" class="panel-card files-card">
+            <h3 class="panel-title">
+              捆绑文件
+              <span class="panel-count">{{ skill.files.length }}</span>
+            </h3>
+            <details v-for="f in skill.files" :key="f.rel_path" class="file-item">
+              <summary class="file-summary">
+                <span class="file-path">{{ f.rel_path }}</span>
+                <span :class="['file-kind', 'file-kind--' + f.kind]">{{ fileKindLabel[f.kind] || f.kind }}</span>
+                <span class="file-size">{{ fileSize(f.content) }}</span>
+              </summary>
+              <pre class="file-content">{{ f.content }}</pre>
+            </details>
+          </div>
+
           <!-- Instruction -->
           <div class="instruction-content" v-html="renderedInstruction" />
         </div>
@@ -107,11 +124,28 @@ const versions = ref<SkillVersionResp[]>([]);
 const loading = ref(false);
 
 const statusLabel: Record<string, string> = { enabled: "已启用", disabled: "已禁用", draft: "草稿" };
-const sourceLabel: Record<string, string> = { builtin: "内置", mcp: "MCP", api: "API" };
+const sourceLabel: Record<string, string> = { builtin: "内置", mcp: "MCP", api: "API", app: "应用" };
+const fileKindLabel: Record<string, string> = {
+  reference: "参考",
+  script: "脚本",
+  template: "模板",
+  asset: "资源",
+};
+
+function fileSize(content: string): string {
+  const n = new Blob([content]).size;
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
+}
+
+// 剥离 SKILL.md 顶部 YAML frontmatter 后再渲染;name/description 已在 hero 卡展示,
+// 不应在正文里重复出现。
+const FRONTMATTER_RE = /^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
 const renderedInstruction = computed(() => {
-  if (!skill.value?.instruction) return "";
-  return marked(skill.value.instruction) as string;
+  const raw = skill.value?.instruction;
+  if (!raw) return "";
+  const body = raw.replace(FRONTMATTER_RE, "");
+  return marked(body) as string;
 });
 
 const skillId = ref(route.params.id as string);
@@ -178,6 +212,8 @@ onMounted(load);
 
 .hero-card { display: flex; gap: 18px; margin-top: 18px; padding: 24px; border: 1px solid var(--color-border); border-radius: 18px; background: var(--surface-strong); }
 .hero-icon { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, var(--color-info-bg-strong), var(--color-violet-bg)); display: flex; align-items: center; justify-content: center; font-size: 28px; color: var(--color-accent); flex-shrink: 0; }
+.hero-icon--emoji { background: var(--color-split); }
+.hero-emoji { font-size: 32px; line-height: 1; }
 .hero-body { flex: 1; min-width: 0; }
 .hero-name-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hero-name { margin: 0; font-size: 20px; font-weight: 700; color: var(--color-text); }
@@ -211,6 +247,62 @@ onMounted(load);
 .source-tag--builtin { background: var(--color-success-bg); color: var(--color-success-strong); }
 .source-tag--mcp { background: var(--color-violet-bg); color: var(--color-accent); }
 .source-tag--api { background: var(--color-cyan-bg); color: var(--color-cyan-text); }
+.source-tag--app { background: var(--color-warning-bg); color: var(--color-warning-strong); }
+
+.files-card { margin-top: 16px; }
+.file-item {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  margin-bottom: 6px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+.file-summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.file-summary::-webkit-details-marker { display: none; }
+.file-summary::before {
+  content: '▸';
+  color: var(--color-text-quaternary);
+  font-size: 11px;
+}
+.file-item[open] .file-summary::before { content: '▾'; }
+.file-path {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--color-text);
+}
+.file-kind {
+  display: inline-flex; align-items: center;
+  height: 18px; padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px; font-weight: 700;
+  background: var(--color-split);
+  color: var(--color-text-tertiary);
+}
+.file-kind--reference { background: var(--color-cyan-bg); color: var(--color-cyan-text); }
+.file-kind--script { background: var(--color-warning-bg); color: var(--color-warning-strong); }
+.file-kind--template { background: var(--color-violet-bg); color: var(--color-accent); }
+.file-kind--asset { background: var(--color-success-bg); color: var(--color-success-strong); }
+.file-size { font-size: 11px; color: var(--color-text-quaternary); }
+.file-content {
+  margin: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--color-border);
+  background: var(--surface-code, var(--color-bg));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
 
 .version-list { display: flex; flex-direction: column; gap: 10px; }
 .version-item { display: flex; align-items: center; gap: 10px; }

@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     # 知识库文档原文 blob 存储根目录(easy-ai 为文档真相源)
     kb_storage_path: str = Field(default="./data/kb_storage")
 
+    # 技能市场数据源(预留):未配置时市场页返回空 + 友好提示。
+    # 未来可指向内置 starter pack JSON、GitHub registry、内部 S3 索引等。
+    skill_market_url: str | None = Field(default=None)
+
 
 settings = Settings()
 

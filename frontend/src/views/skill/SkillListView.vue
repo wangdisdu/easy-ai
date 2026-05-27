@@ -5,13 +5,19 @@
         <h2 class="skill-page-title">技能管理</h2>
         <p class="skill-page-sub">管理智能体可调用的技能模块，配置技能参数与工具绑定</p>
       </div>
-      <a-button v-if="canEdit" type="primary" class="skill-head-btn" @click="router.push('/skill/create')">
-        <template #icon><PlusOutlined /></template>
-        创建技能
-      </a-button>
+      <div class="skill-head-actions">
+        <a-button class="skill-head-btn" @click="router.push('/skill-market')">
+          <template #icon><AppstoreOutlined /></template>
+          从市场安装
+        </a-button>
+        <a-button v-if="canEdit" type="primary" class="skill-head-btn" @click="router.push('/skill/create')">
+          <template #icon><PlusOutlined /></template>
+          创建技能
+        </a-button>
+      </div>
     </div>
 
-    <!-- Search + Category Filter -->
+    <!-- Search + Status + Category Filter -->
     <div class="filter-bar">
       <a-input-search
         v-model:value="keyword"
@@ -20,12 +26,22 @@
         allow-clear
         @search="onSearch"
       />
+      <div class="status-chips">
+        <button
+          v-for="s in statusFilters"
+          :key="s.value"
+          :class="['status-chip', { 'status-chip--active': filterStatus === s.value }]"
+          @click="selectStatus(s.value)"
+        >
+          {{ s.label }}
+        </button>
+      </div>
       <div class="filter-chips">
         <button
           :class="['filter-chip', { 'filter-chip--active': filterCategoryId === '' }]"
           @click="selectCategory('')"
         >
-          全部
+          全部分类
         </button>
         <button
           v-for="cat in categories"
@@ -48,8 +64,9 @@
           @click="router.push(`/skill/${skill.id}`)"
         >
           <div class="skill-card-top">
-            <div class="skill-card-icon">
-              <ThunderboltOutlined />
+            <div class="skill-card-icon" :class="{ 'skill-card-icon--emoji': !!skill.emoji }">
+              <span v-if="skill.emoji" class="skill-card-emoji">{{ skill.emoji }}</span>
+              <ThunderboltOutlined v-else />
             </div>
             <div class="skill-card-info">
               <h4 class="skill-card-name">{{ skill.name }}</h4>
@@ -96,7 +113,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { PlusOutlined, ThunderboltOutlined, ToolOutlined } from "@ant-design/icons-vue";
+import {
+  AppstoreOutlined,
+  PlusOutlined,
+  ThunderboltOutlined,
+  ToolOutlined,
+} from "@ant-design/icons-vue";
 import * as categoryApi from "@/api/appCategory";
 import * as skillApi from "@/api/skill";
 import type { AppCategoryResp, SkillResp } from "@/api/types";
@@ -110,6 +132,7 @@ const canEdit = computed(() => auth.hasPermission(PERM.SKILL_EDIT));
 
 const keyword = ref("");
 const filterCategoryId = ref("");
+const filterStatus = ref("");
 const list = ref<SkillResp[]>([]);
 const total = ref(0);
 const loading = ref(false);
@@ -123,8 +146,21 @@ const statusLabel: Record<string, string> = {
   draft: "草稿",
 };
 
+const statusFilters: Array<{ label: string; value: string }> = [
+  { label: "全部", value: "" },
+  { label: "已启用", value: "enabled" },
+  { label: "已禁用", value: "disabled" },
+  { label: "草稿", value: "draft" },
+];
+
 function selectCategory(id: string) {
   filterCategoryId.value = id;
+  pageNo.value = 1;
+  loadList();
+}
+
+function selectStatus(value: string) {
+  filterStatus.value = value;
   pageNo.value = 1;
   loadList();
 }
@@ -142,6 +178,7 @@ async function loadList() {
       page_size: pageSize.value,
       keyword: keyword.value || undefined,
       category_id: filterCategoryId.value || undefined,
+      skill_status: filterStatus.value || undefined,
     });
     list.value = data.data;
     total.value = data.total;
@@ -175,9 +212,18 @@ onMounted(() => {
 .skill-page-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--color-text); }
 .skill-page-sub { margin: 6px 0 0; font-size: 13px; color: var(--color-text-tertiary); }
 .skill-head-btn { height: 40px; padding-inline: 16px; border-radius: 12px; }
+.skill-head-actions { display: flex; gap: 8px; flex-shrink: 0; }
 
-.filter-bar { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 4px 0; }
+.filter-bar { display: flex; align-items: center; gap: 16px; margin-top: 18px; padding: 4px 0; flex-wrap: wrap; }
 .search-input { width: 280px; flex-shrink: 0; }
+.status-chips { display: flex; gap: 0; flex-shrink: 0; }
+.status-chip { border: 1px solid var(--color-border); background: transparent; padding: 7px 14px; color: var(--color-text-tertiary); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s ease; }
+.status-chip:first-child { border-radius: 8px 0 0 8px; }
+.status-chip:last-child { border-radius: 0 8px 8px 0; }
+.status-chip:not(:first-child) { border-left: none; }
+.status-chip:hover { color: var(--color-text); background: var(--surface-muted-hover); }
+.status-chip--active { color: var(--color-accent); background: var(--color-violet-bg); border-color: var(--color-violet-bg-strong); }
+.status-chip--active + .status-chip { border-left: none; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .filter-chip { border: 1px solid transparent; border-radius: 999px; background: var(--color-split); padding: 8px 14px; color: var(--color-text-tertiary); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.18s ease; }
 .filter-chip:hover, .filter-chip--active { border-color: var(--color-violet-bg-strong); background: var(--color-violet-bg); color: var(--color-accent); }
@@ -189,6 +235,8 @@ onMounted(() => {
 
 .skill-card-top { display: flex; align-items: flex-start; gap: 12px; }
 .skill-card-icon { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, var(--color-info-bg-strong), var(--color-violet-bg)); display: flex; align-items: center; justify-content: center; font-size: 18px; color: var(--color-accent); flex-shrink: 0; }
+.skill-card-icon--emoji { background: var(--color-split); }
+.skill-card-emoji { font-size: 20px; line-height: 1; }
 .skill-card-info { flex: 1; min-width: 0; }
 .skill-card-name { margin: 0; font-size: 15px; font-weight: 700; color: var(--color-text); }
 

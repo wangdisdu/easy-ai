@@ -249,18 +249,67 @@ export interface SkillToolItem {
   tool_name: string;
 }
 
+export interface SkillFileItem {
+  rel_path: string;
+  kind?: string | null;
+  content: string;
+  executable?: boolean;
+}
+
+export interface SkillFileResp {
+  rel_path: string;
+  kind: string;
+  content: string;
+  executable: boolean;
+}
+
 export interface SkillResp {
   id: string;
   name: string;
   description?: string | null;
+  emoji?: string | null;
   category_ids?: string[];
   categories?: AppCategoryRef[];
   instruction: string;
   skill_status: string;
   current_version?: string | null;
   tools: SkillToolItem[];
+  files?: SkillFileResp[];
   create_time: number;
   update_time: number;
+}
+
+// ── Skill Market ──
+
+export interface MarketFile {
+  rel_path: string;
+  kind: string;
+  content?: string | null;
+  size: number;
+  binary: boolean;
+}
+
+export interface MarketSkill {
+  slug: string;
+  name: string;
+  description?: string | null;
+  emoji?: string | null;
+  version?: string | null;
+  author?: string | null;
+  homepage?: string | null;
+  instruction?: string | null;
+  files: MarketFile[];
+  stars?: number | null;
+  downloads?: number | null;
+  platforms: string[];
+  changelog?: string | null;
+  content_loaded: boolean;
+}
+
+export interface MarketSearchResp {
+  items: MarketSkill[];
+  configured: boolean;
+  message?: string | null;
 }
 
 export interface SkillVersionResp {

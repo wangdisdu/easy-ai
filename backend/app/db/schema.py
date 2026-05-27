@@ -169,6 +169,7 @@ class TbSkill(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    emoji: Mapped[str | None] = mapped_column(String(16), nullable=True)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     skill_status: Mapped[str] = mapped_column(String(255), nullable=False)
     current_version: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -191,6 +192,28 @@ class TbSkillTool(Base):
     tool_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     tool_source: Mapped[str] = mapped_column(String(255), nullable=False)
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    update_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class TbSkillFile(Base):
+    """技能捆绑文件:references / scripts / templates / assets 四类。
+
+    rel_path 形如 `references/usage.md` / `scripts/gen.py`,首段决定 kind。
+    在 SkillService._sync_skill_files 中强校验路径合法性(无 .. / 绝对路径)。
+    """
+
+    __tablename__ = "tb_skill_file"
+    __table_args__ = (UniqueConstraint("skill_id", "rel_path", name="uk_tb_skill_file_skill_path"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    skill_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rel_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    executable: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     create_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
     create_user: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

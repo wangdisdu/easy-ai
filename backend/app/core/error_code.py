@@ -32,3 +32,6 @@ class ErrorCode:
     # 指标 / 单位 / 范围组合非法
     ALERT_RULE_INVALID_CONFIG = 1402
     ALERT_RECORD_NOT_FOUND = 1403
+
+    # 技能市场 — 数据源未配置(settings.skill_market_url 为 None)
+    SKILL_MARKET_NOT_CONFIGURED = 1500

@@ -23,6 +23,7 @@ from app.api.sandbox_image_api import router as sandbox_image_router
 from app.api.sandbox_instance_api import router as sandbox_instance_router
 from app.api.sandbox_view_api import router as sandbox_view_router
 from app.api.skill_api import router as skill_router
+from app.api.skill_market_api import router as skill_market_router
 from app.api.sync_log_api import router as sync_log_router
 from app.api.system_setting_api import router as system_setting_router
 from app.api.tool_api import mcp_router
@@ -42,6 +43,7 @@ api_router.include_router(app_category_router, dependencies=_login_required)
 api_router.include_router(app_router, dependencies=_login_required)
 api_router.include_router(open_router, dependencies=_login_required)
 api_router.include_router(skill_router, dependencies=_login_required)
+api_router.include_router(skill_market_router, dependencies=_login_required)
 api_router.include_router(tool_router, dependencies=_login_required)
 api_router.include_router(tool_policy_router, dependencies=_login_required)
 api_router.include_router(policy_router, dependencies=_login_required)

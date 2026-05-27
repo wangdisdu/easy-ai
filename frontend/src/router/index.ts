@@ -111,6 +111,16 @@ const router = createRouter({
           component: () => import("@/views/skill/SkillFormView.vue"),
         },
         {
+          path: "skill-market",
+          name: "skill-market",
+          meta: {
+            title: "技能市场",
+            menu: { title: "技能市场", icon: "appstore", order: 3.5 },
+            permissions: SKILL_ANY,
+          },
+          component: () => import("@/views/skill/SkillMarketView.vue"),
+        },
+        {
           path: "tool",
           name: "tool",
           meta: {

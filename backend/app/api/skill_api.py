@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -49,6 +49,21 @@ def create_skill(
     req_ctx: RequestContext = Depends(build_request_context),
 ) -> Resp[SkillResp]:
     return Resp(data=service.create_skill(db=db, req=req, req_ctx=req_ctx))
+
+
+@router.post("/upload-zip", response_model=Resp[SkillResp])
+async def upload_skill_zip(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    req_ctx: RequestContext = Depends(build_request_context),
+) -> Resp[SkillResp]:
+    """从 .zip 上传创建技能。
+
+    要求根目录有 SKILL.md(YAML frontmatter 含 name + description),
+    其他文件按 references/scripts/templates/assets 四类目录归档。
+    """
+    blob = await file.read()
+    return Resp(data=service.create_skill_from_zip(db=db, blob=blob, req_ctx=req_ctx))
 
 
 @router.get("/{skill_id}", response_model=Resp[SkillResp])
