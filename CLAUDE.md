@@ -27,7 +27,7 @@ make code-format     # ruff --fix + black
 make code-check      # ruff + black --check (CI)
 ```
 
-Environment: copy `.env.example` to `.env`. Key vars: `DATABASE_URL` (postgres, e.g. `postgresql+psycopg://easyai:...@127.0.0.1:18032/easyai`), `JWT_SECRET`, `SNOWFLAKE_WORKER_ID`. Local dev needs a postgres reachable at `DATABASE_URL` — easiest is `cd deploy && ./deploy.sh up postgres`.
+Environment: copy `.env.example` to `.env`. Key vars: `DATABASE_URL` (postgres, e.g. `postgresql+psycopg://easyai:...@127.0.0.1:18032/easyai`), `JWT_SECRET`, `SNOWFLAKE_WORKER_ID`. Local dev needs a postgres reachable at `DATABASE_URL` — easiest is `cd deploy && ./deploy.sh start postgres`.
 
 ### Architecture (backend/app/)
 

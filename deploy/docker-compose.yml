@@ -84,6 +84,9 @@ services:
       PORT: 3001
       EASYAI_TRUSTED_HEADER: "true"
       EASYAI_SHARED_SECRET: ${FLOWISE_SHARED_SECRET}
+      EASYAI_BOOTSTRAP_EMAIL: ${EASYAI_BOOTSTRAP_EMAIL}
+      EASYAI_BOOTSTRAP_NICKNAME: ${EASYAI_BOOTSTRAP_NICKNAME}
+      EASYAI_BOOTSTRAP_PASSWORD: ${EASYAI_BOOTSTRAP_PASSWORD}
       IFRAME_ORIGINS: "*"
       DATABASE_PATH: /root/.flowise
       SECRETKEY_PATH: /root/.flowise
@@ -92,6 +95,26 @@ services:
       DISABLE_FLOWISE_TELEMETRY: "true"
     volumes:
       - flowise-data:/root/.flowise
+
+
+  # ---- Dev-only: 反代到 Flowise（mock easy-ai-backend 反代行为）----
+  # 生产场景下 Flowise 走 easy-ai-backend 反代（带 HMAC trusted-header SSO），
+  # 直接访问 flowise:3001 走不通(UI base 是 /flowise/、auth 走 /flowise/api/*)。
+  # 本服务起一个 nginx 在宿主 127.0.0.1:8888 上模拟反代,剥前缀转发,
+  # 让 dev/test 场景下能用 admin@easyai.com / admin@123 直接登录 Flowise UI。
+  # 启用方式: ./deploy.sh up --profile flowise-dev
+  # 或在 .env 加 FLOWISE_DEV_PROXY=true 自动启用(见 deploy.sh)
+  flowise-dev-proxy:
+    image: nginx:alpine
+    container_name: easy-ai-flowise-dev-proxy
+    profiles: ["flowise-dev"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:80"
+    volumes:
+      - ./flowise-dev-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - flowise
 
   # ============================================================
   # Langfuse 应用
